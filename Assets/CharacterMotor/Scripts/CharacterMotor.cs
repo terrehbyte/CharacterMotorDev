@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 using System.Linq;
+using MoreGizmos;
 
 [SelectionBase]
 public class CharacterMotor : MonoBehaviour
@@ -16,17 +17,20 @@ public class CharacterMotor : MonoBehaviour
 
     [Header("Movement")]
     public Vector3 velocity;
+    public bool shouldCollide = true;
 
     public float groundFriction = 11;
     public float groundAcceleration = 50;
     public float groundMaxSpeed = 5.0f;
 
+    public float airAcceleration = 8;
+    public float airMaxSpeed = 300.0f;
+
     [Header("Ground Check")]
     public bool isGrounded;
+    public float groundCheckLengthMultiplier = 2.0f;
     [SerializeField]
     private Collider groundCol;
-    [SerializeField]
-    private float groundCheckLength = 1.5f;
     [SerializeField]
     private LayerMask groundCheckLayer;
     [SerializeField]
@@ -59,6 +63,11 @@ public class CharacterMotor : MonoBehaviour
         return Accelerate(accelDir, prevVelocity, acceleration, maxSpeed);
     }
 
+    private Vector3 MoveAir(Vector3 accelDir, Vector3 prevVelocity, float acceleration, float maxSpeed)
+    {
+        return Accelerate(accelDir, prevVelocity, acceleration, maxSpeed);
+    }
+
     // Returns the player's new velocity based on the given parameters
     // accelDir: world-space direction to accelerate in
     // prevVelocity: world-space velocity
@@ -78,28 +87,27 @@ public class CharacterMotor : MonoBehaviour
     }
 
     // Returns the collider that the player is standing on
-    private Collider QueryGroundCheck(out Vector3 groundPoint)
+    private Collider QueryGroundCheck(out Vector3 groundPoint, out Vector3 groundNormal)
     {
         Collider groundCollider = null;
         groundPoint = Vector3.zero;
+        groundNormal = Vector3.zero;
         RaycastHit groundHit;
 
-        var hits = playerRigidbody.SweepTestAll(Vector3.down, Mathf.Abs(Physics.gravity.y * Time.fixedDeltaTime), QueryTriggerInteraction.Ignore);
+        var hits = playerRigidbody.SweepTestAll(Vector3.down, Mathf.Abs(Physics.gravity.y * Time.fixedDeltaTime * groundCheckLengthMultiplier), QueryTriggerInteraction.Ignore);
+        hits = hits.OrderByDescending(x => x.distance).Reverse().ToArray();
         foreach(var hit in hits)
         {
-            if((hit.collider != playerCollider)) { groundHit = hit; groundPoint = hit.point; return hit.collider; }
+            if((hit.collider != playerCollider))
+            {
+                groundHit = hit;
+                groundPoint = hit.point;
+                groundNormal = hit.normal;
+                return hit.collider;
+            }
         }
 
         return groundCollider;
-    }
-
-    private void DrawGizmo(bool selected)
-    {
-        Gizmos.color = isGrounded ? Color.green : Color.red;
-        Gizmos.DrawRay(transform.position, Vector3.down * Mathf.Abs(Physics.gravity.y * Time.fixedDeltaTime));
-
-        Gizmos.color = Color.blue;
-        Gizmos.DrawSphere(playerCollider.bounds.center, 0.1f);
     }
 
     private void Start()
@@ -128,39 +136,80 @@ public class CharacterMotor : MonoBehaviour
     {
         // determine grounded status
         Vector3 groundPoint;
-        isGrounded = QueryGroundCheck(out groundPoint) != null;
+        Vector3 potentialPosition = transform.position;
+        isGrounded = (groundCol = QueryGroundCheck(out groundPoint, out groundNorm)) != null;
+        if(isGrounded)
+        {
+            Vector3 closestOnPlayer = playerCollider.ClosestPoint(groundPoint);
+            GizmosEx.DrawSphere(closestOnPlayer, 0.1f, Color.green);
+            GizmosEx.DrawSphere(groundPoint, 0.1f, Color.red);
+            Vector3 offset = closestOnPlayer - transform.position;
+            GizmosEx.DrawSphere(groundPoint - offset, 0.05f, Color.blue);
+            potentialPosition = (groundPoint - offset) + groundNorm * Physics.defaultContactOffset;
+        }
 
         // process handle player input
         Vector3 worldDir = ControllerToWorldDirection(moveWish);
+        worldDir = worldDir.magnitude > 0 ? Vector3.ProjectOnPlane(worldDir, isGrounded ? groundNorm : Vector3.up) :
+                                            Vector3.zero;
         velocity = MoveGround(worldDir, velocity, groundAcceleration, groundMaxSpeed);
 
-        Vector3 offset = velocity * Time.deltaTime;
-        Vector3 potentialPosition = transform.position + offset;
-        var hits = Physics.RaycastAll(transform.position, offset, offset.magnitude, groundCheckLayer, QueryTriggerInteraction.Ignore);
-        potentialPosition = (hits.Length > 0 ? hits.OrderByDescending(x => x.distance).Last().point : potentialPosition);
-        Vector3 offsetFromCenter = playerCollider.bounds.center - transform.position;
+        // determine estimated displacement
+        Vector3 displacement = velocity * Time.deltaTime;
+        potentialPosition = potentialPosition + displacement;
 
-        var candidates = Physics.OverlapBox(potentialPosition + offsetFromCenter, playerCollider.bounds.extents, transform.rotation, groundCheckLayer, QueryTriggerInteraction.Ignore);
-        if(candidates.Length == 0)
+        if(shouldCollide)
         {
-            playerRigidbody.MovePosition(potentialPosition);
-            return;
+            // first test: where would we end up if we moved directly?
+            var hits = Physics.RaycastAll(transform.position, displacement, displacement.magnitude, groundCheckLayer, QueryTriggerInteraction.Ignore);
+            potentialPosition = (hits.Length > 0 ? hits.OrderByDescending(x => x.distance).Last().point : potentialPosition);
+            Vector3 offsetFromCenter = playerCollider.bounds.center - transform.position;
+
+            // could we potentially overlap w/ something near us?
+            var candidates = Physics.OverlapBox(potentialPosition + offsetFromCenter, playerCollider.bounds.extents, transform.rotation, groundCheckLayer, QueryTriggerInteraction.Ignore);
+            if(candidates.Length == 0)
+            {
+                // exit early if nothing is overlapping
+                playerRigidbody.MovePosition(potentialPosition);
+                return;
+            }
+
+            // second test: depenetrate player from any overlapping geometry
+            // attempt to move player away from contacts
+            Vector3 finalMTV = Vector3.zero;
+            foreach(var candidate in candidates)
+            {
+                float mtvDist;
+                Vector3 mtv;
+                bool pen = Physics.ComputePenetration(playerCollider, potentialPosition, transform.rotation, candidate, candidate.transform.position, candidate.transform.rotation, out mtv, out mtvDist);
+                if(pen)
+                {
+                    finalMTV += mtv * mtvDist;
+                }
+            }
+            potentialPosition += finalMTV + (finalMTV.normalized * Physics.defaultContactOffset);
         }
 
-        float mtvDist;
-        Vector3 mtv;
-        bool pen = Physics.ComputePenetration(playerCollider, potentialPosition, transform.rotation, candidates[0], candidates[0].transform.position, candidates[0].transform.rotation, out mtv, out mtvDist);
-        if(pen)
-        {
-            potentialPosition += mtv * (mtvDist + Physics.defaultContactOffset);
-        }
-        playerRigidbody.MovePosition(potentialPosition);
+        // finally: move the player to the end result
+        playerRigidbody.position = potentialPosition;
     }
 
     private void Reset()
     {
         playerRigidbody = GetComponent<Rigidbody>();
         playerCollider = GetComponent<Collider>();
+    }
+
+    private void DrawGizmo(bool selected)
+    {
+        Gizmos.color = isGrounded ? Color.green : Color.red;
+        Gizmos.DrawRay(transform.position, Vector3.down * Mathf.Abs(Physics.gravity.y * Time.fixedDeltaTime * groundCheckLengthMultiplier));
+
+        Gizmos.color = Color.blue;
+        Gizmos.DrawSphere(playerCollider.bounds.center, 0.1f);
+        
+        Gizmos.color = Color.black;
+        Gizmos.DrawRay(transform.position, velocity);
     }
 
     private void OnDrawGizmos() => DrawGizmo(false);
