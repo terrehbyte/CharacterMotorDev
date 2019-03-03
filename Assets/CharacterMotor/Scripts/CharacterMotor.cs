@@ -14,6 +14,8 @@ public class CharacterMotor : MonoBehaviour
 
     [Header("Input")]
     private Vector3 moveWish;
+    private bool jumpWish;
+    public bool allowAutoBhop = true;
 
     [Header("Movement")]
     public Vector3 velocity;
@@ -25,6 +27,7 @@ public class CharacterMotor : MonoBehaviour
 
     public float airAcceleration = 8;
     public float airMaxSpeed = 300.0f;
+    private float gravityMultiplier = 2.0f;
 
     [Header("Ground Check")]
     public bool isGrounded;
@@ -130,6 +133,14 @@ public class CharacterMotor : MonoBehaviour
     private void Update()
     {
         moveWish = new Vector3(Input.GetAxisRaw("Horizontal"), 0.0f, Input.GetAxisRaw("Vertical"));
+        if(allowAutoBhop)
+        {
+            jumpWish = Input.GetButton("Jump");
+        }
+        else
+        {
+            jumpWish = Input.GetButtonDown("Jump");
+        }
     }
 
     private void FixedUpdate()
@@ -137,6 +148,7 @@ public class CharacterMotor : MonoBehaviour
         // determine grounded status
         Vector3 groundPoint;
         Vector3 potentialPosition = transform.position;
+        bool wasGrounded = isGrounded;
         isGrounded = (groundCol = QueryGroundCheck(out groundPoint, out groundNorm)) != null;
         if(isGrounded)
         {
@@ -147,12 +159,33 @@ public class CharacterMotor : MonoBehaviour
             GizmosEx.DrawSphere(groundPoint - offset, 0.05f, Color.blue);
             potentialPosition = (groundPoint - offset) + groundNorm * Physics.defaultContactOffset;
         }
+        if(!wasGrounded && isGrounded)
+        {
+            velocity.y = 0.0f;
+        }
 
         // process handle player input
         Vector3 worldDir = ControllerToWorldDirection(moveWish);
         worldDir = worldDir.magnitude > 0 ? Vector3.ProjectOnPlane(worldDir, isGrounded ? groundNorm : Vector3.up) :
                                             Vector3.zero;
-        velocity = MoveGround(worldDir, velocity, groundAcceleration, groundMaxSpeed);
+        
+        if(jumpWish && isGrounded)
+        {
+            isGrounded = false;
+            potentialPosition.y += Physics.defaultContactOffset;
+            velocity.y = 9.8f;
+            jumpWish = false;
+        }
+
+        if(isGrounded)
+        {
+            velocity = MoveGround(worldDir, velocity, groundAcceleration, groundMaxSpeed);
+        }
+        else
+        {
+            velocity = MoveAir(worldDir, velocity, airAcceleration, airMaxSpeed);
+            velocity = Accelerate(Physics.gravity.normalized, velocity, Physics.gravity.magnitude * gravityMultiplier, float.MaxValue );
+        }
 
         // determine estimated displacement
         Vector3 displacement = velocity * Time.deltaTime;
