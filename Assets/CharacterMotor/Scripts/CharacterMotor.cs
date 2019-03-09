@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using System.Linq;
 using MoreGizmos;
+using System;
 
 [SelectionBase]
 public class CharacterMotor : MonoBehaviour
@@ -18,6 +19,7 @@ public class CharacterMotor : MonoBehaviour
     public bool allowAutoBhop = true;
 
     [Header("Movement")]
+    public bool noclip;
     public Vector3 velocity;
     public bool shouldCollide = true;
 
@@ -25,9 +27,10 @@ public class CharacterMotor : MonoBehaviour
     public float groundAcceleration = 50;
     public float groundMaxSpeed = 5.0f;
 
+    public float airFriction = 1;
     public float airAcceleration = 8;
     public float airMaxSpeed = 300.0f;
-    private float gravityMultiplier = 2.0f;
+    public float gravityMultiplier = 2.0f;
 
     [Header("Ground Check")]
     public bool isGrounded;
@@ -54,20 +57,15 @@ public class CharacterMotor : MonoBehaviour
     // Returns the player's new velocity when moving on the ground
     // accelDir: world-space direction to accelerate in
     // prevVelocity: world-space velocity
-    private Vector3 MoveGround(Vector3 accelDir, Vector3 prevVelocity, float acceleration, float maxSpeed)
+    private Vector3 Move(Vector3 accelDir, Vector3 prevVelocity, float acceleration, float maxSpeed, float friction)
     {
         float speed = prevVelocity.magnitude;
         if (speed != 0)
         {
-            float drop = speed * groundFriction * Time.fixedDeltaTime;
+            float drop = speed * friction * Time.deltaTime;
             prevVelocity *= Mathf.Max(speed - drop, 0) / speed;
         }
 
-        return Accelerate(accelDir, prevVelocity, acceleration, maxSpeed);
-    }
-
-    private Vector3 MoveAir(Vector3 accelDir, Vector3 prevVelocity, float acceleration, float maxSpeed)
-    {
         return Accelerate(accelDir, prevVelocity, acceleration, maxSpeed);
     }
 
@@ -79,7 +77,7 @@ public class CharacterMotor : MonoBehaviour
     private Vector3 Accelerate(Vector3 accelDir, Vector3 prevVelocity, float accelerate, float maxSpeed)
     {
         float projVel = Vector3.Dot(prevVelocity, accelDir);
-        float accelVel = accelerate * Time.fixedDeltaTime;
+        float accelVel = accelerate * Time.deltaTime;
 
         if(projVel + accelVel > maxSpeed)
         {
@@ -97,7 +95,7 @@ public class CharacterMotor : MonoBehaviour
         groundNormal = Vector3.zero;
         RaycastHit groundHit;
 
-        var hits = playerRigidbody.SweepTestAll(Vector3.down, Mathf.Abs(Physics.gravity.y * Time.fixedDeltaTime * groundCheckLengthMultiplier), QueryTriggerInteraction.Ignore);
+        var hits = playerRigidbody.SweepTestAll(Vector3.down, Mathf.Abs(Physics.gravity.y * Time.deltaTime * groundCheckLengthMultiplier), QueryTriggerInteraction.Ignore);
         hits = hits.OrderByDescending(x => x.distance).Reverse().ToArray();
         foreach(var hit in hits)
         {
@@ -139,12 +137,29 @@ public class CharacterMotor : MonoBehaviour
         }
         else
         {
-            jumpWish = Input.GetButtonDown("Jump");
+            jumpWish = Input.GetButtonDown("Jump") || jumpWish;
         }
     }
 
     private void FixedUpdate()
     {
+        // process handle player input
+        Vector3 worldDir = ControllerToWorldDirection(moveWish);
+        Debug.Log(worldDir);
+        Debug.DrawRay(transform.position, worldDir, Color.cyan, Time.fixedDeltaTime);
+        if(noclip)
+        {
+            worldDir = Vector3.ProjectOnPlane(worldDir, playerCamera.transform.up);
+            worldDir += playerCamera.transform.up * Input.GetAxisRaw("Fly");
+
+            velocity = Move(worldDir, velocity, airAcceleration * 10.0f, airMaxSpeed, 5);
+            playerRigidbody.position = transform.position + velocity * Time.deltaTime;
+            return;
+        }
+
+        worldDir = worldDir.magnitude > 0 ? Vector3.ProjectOnPlane(worldDir, isGrounded ? groundNorm : Vector3.up) :
+                                            Vector3.zero;
+
         // determine grounded status
         Vector3 groundPoint;
         Vector3 potentialPosition = transform.position;
@@ -164,26 +179,21 @@ public class CharacterMotor : MonoBehaviour
             velocity.y = 0.0f;
         }
 
-        // process handle player input
-        Vector3 worldDir = ControllerToWorldDirection(moveWish);
-        worldDir = worldDir.magnitude > 0 ? Vector3.ProjectOnPlane(worldDir, isGrounded ? groundNorm : Vector3.up) :
-                                            Vector3.zero;
-        
         if(jumpWish && isGrounded)
         {
             isGrounded = false;
             potentialPosition.y += Physics.defaultContactOffset;
-            velocity.y = 9.8f;
+            velocity.y += 9.8f;
             jumpWish = false;
         }
 
         if(isGrounded)
         {
-            velocity = MoveGround(worldDir, velocity, groundAcceleration, groundMaxSpeed);
+            velocity = Move(worldDir, velocity, groundAcceleration, groundMaxSpeed, groundFriction);
         }
         else
         {
-            velocity = MoveAir(worldDir, velocity, airAcceleration, airMaxSpeed);
+            velocity = Move(worldDir, velocity, airAcceleration, airMaxSpeed, airFriction);
             velocity = Accelerate(Physics.gravity.normalized, velocity, Physics.gravity.magnitude * gravityMultiplier, float.MaxValue );
         }
 
@@ -236,7 +246,7 @@ public class CharacterMotor : MonoBehaviour
     private void DrawGizmo(bool selected)
     {
         Gizmos.color = isGrounded ? Color.green : Color.red;
-        Gizmos.DrawRay(transform.position, Vector3.down * Mathf.Abs(Physics.gravity.y * Time.fixedDeltaTime * groundCheckLengthMultiplier));
+        Gizmos.DrawRay(transform.position, Vector3.down * Mathf.Abs(Physics.gravity.y * Time.deltaTime * groundCheckLengthMultiplier));
 
         Gizmos.color = Color.blue;
         Gizmos.DrawSphere(playerCollider.bounds.center, 0.1f);

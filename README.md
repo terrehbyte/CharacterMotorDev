@@ -13,6 +13,11 @@ out-of-the-box.
 - [Super Character Controller](https://roystanross.wordpress.com/category/unity-character-controller-series/)
 - [2D Platformer Collision Detection](http://deranged-hermit.blogspot.com/2014/01/2d-platformer-collision-detection-with.html)
 
+## Alternatives
+
+- ⭐ [Kinematic Character Controller]
+- [UFPS]
+
 ## License
 
 MIT License (c) 2019 Terry Nguyen
