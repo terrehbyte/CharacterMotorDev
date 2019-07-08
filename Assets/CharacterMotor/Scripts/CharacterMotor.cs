@@ -15,7 +15,8 @@ public class CharacterMotor : MonoBehaviour
     [Header("Input")]
     private Vector3 moveWish;
     private bool jumpWish;
-    public bool allowAutoBhop = true;
+    public bool canQueueJump = false;
+    public bool allowAutoBhop = false;
 
     [Header("Movement")]
     public Vector3 velocity;
@@ -57,6 +58,7 @@ public class CharacterMotor : MonoBehaviour
     private Vector3 MoveGround(Vector3 accelDir, Vector3 prevVelocity, float acceleration, float maxSpeed)
     {
         float speed = prevVelocity.magnitude;
+
         if (speed != 0)
         {
             float drop = speed * groundFriction * Time.fixedDeltaTime;
@@ -79,7 +81,7 @@ public class CharacterMotor : MonoBehaviour
     private Vector3 Accelerate(Vector3 accelDir, Vector3 prevVelocity, float accelerate, float maxSpeed)
     {
         float projVel = Vector3.Dot(prevVelocity, accelDir);
-        float accelVel = accelerate * Time.fixedDeltaTime;
+        float accelVel = Mathf.Min(accelerate * Time.fixedDeltaTime, accelDir.magnitude);
 
         if(projVel + accelVel > maxSpeed)
         {
@@ -133,13 +135,14 @@ public class CharacterMotor : MonoBehaviour
     private void Update()
     {
         moveWish = new Vector3(Input.GetAxisRaw("Horizontal"), 0.0f, Input.GetAxisRaw("Vertical"));
+
         if(allowAutoBhop)
         {
             jumpWish = Input.GetButton("Jump");
         }
         else
         {
-            jumpWish = Input.GetButtonDown("Jump");
+            jumpWish = jumpWish || Input.GetButtonDown("Jump");
         }
     }
 
@@ -157,24 +160,32 @@ public class CharacterMotor : MonoBehaviour
             GizmosEx.DrawSphere(groundPoint, 0.1f, Color.red);
             Vector3 offset = closestOnPlayer - transform.position;
             GizmosEx.DrawSphere(groundPoint - offset, 0.05f, Color.blue);
-            potentialPosition = (groundPoint - offset) + groundNorm * Physics.defaultContactOffset;
+            potentialPosition = (groundPoint - offset);
         }
         if(!wasGrounded && isGrounded)
         {
             velocity.y = 0.0f;
+            Debug.Log("[MOTOR] Landing detected.");
         }
 
         // process handle player input
         Vector3 worldDir = ControllerToWorldDirection(moveWish);
         worldDir = worldDir.magnitude > 0 ? Vector3.ProjectOnPlane(worldDir, isGrounded ? groundNorm : Vector3.up) :
                                             Vector3.zero;
-        
-        if(jumpWish && isGrounded)
+
+        if (jumpWish)
         {
-            isGrounded = false;
-            potentialPosition.y += Physics.defaultContactOffset;
-            velocity.y = 9.8f;
-            jumpWish = false;
+            if (isGrounded)
+            {
+                Debug.Log("[MOTOR] Jumping! Now airborne.");
+                isGrounded = false;
+                velocity.y = 9.8f;
+                jumpWish = false;
+            }
+            else
+            {
+                jumpWish = canQueueJump || false;
+            }
         }
 
         if(isGrounded)
@@ -185,6 +196,11 @@ public class CharacterMotor : MonoBehaviour
         {
             velocity = MoveAir(worldDir, velocity, airAcceleration, airMaxSpeed);
             velocity = Accelerate(Physics.gravity.normalized, velocity, Physics.gravity.magnitude * gravityMultiplier, float.MaxValue );
+        }
+
+        if (velocity.magnitude * velocity.magnitude * 0.5 < Physics.sleepThreshold)
+        {
+            velocity = Vector3.zero;
         }
 
         // determine estimated displacement
@@ -203,8 +219,7 @@ public class CharacterMotor : MonoBehaviour
             if(candidates.Length == 0)
             {
                 // exit early if nothing is overlapping
-                playerRigidbody.MovePosition(potentialPosition);
-                return;
+                goto CommitMove;
             }
 
             // second test: depenetrate player from any overlapping geometry
@@ -215,16 +230,27 @@ public class CharacterMotor : MonoBehaviour
                 float mtvDist;
                 Vector3 mtv;
                 bool pen = Physics.ComputePenetration(playerCollider, potentialPosition, transform.rotation, candidate, candidate.transform.position, candidate.transform.rotation, out mtv, out mtvDist);
-                if(pen)
+                if(pen && mtvDist > Physics.defaultContactOffset)
                 {
                     finalMTV += mtv * mtvDist;
                 }
             }
-            potentialPosition += finalMTV + (finalMTV.normalized * Physics.defaultContactOffset);
+
+            potentialPosition += finalMTV;
         }
 
+        CommitMove:
+
         // finally: move the player to the end result
+        potentialPosition += -Physics.gravity.normalized * Physics.defaultContactOffset;
+
+        Debug.AssertFormat(velocity.magnitude > 0 || (playerRigidbody.position == potentialPosition),
+                           this, "CurrentPosition {0} != potentialPosition {1} but velocity is zero! Difference is {2}.",
+                           playerRigidbody.position, potentialPosition, (playerRigidbody.position - potentialPosition).ToString("F7"));
+
         playerRigidbody.position = potentialPosition;
+
+        Debug.DrawRay(playerRigidbody.position, groundNorm * 3.0f, Color.yellow);
     }
 
     private void Reset()
@@ -247,4 +273,14 @@ public class CharacterMotor : MonoBehaviour
 
     private void OnDrawGizmos() => DrawGizmo(false);
     private void OnDrawGizmosSelected() => DrawGizmo(true);
+
+    private bool CompareVector3Exact(Vector3 a, Vector3 b)
+    {
+        for (int i = 0; i < 3; ++i)
+        {
+            if(a[i] != b[i]) { return false; }
+        }
+
+        return true;
+    }
 }
