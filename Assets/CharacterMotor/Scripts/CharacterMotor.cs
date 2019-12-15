@@ -5,12 +5,13 @@ using System.Linq;
 using MoreGizmos;
 
 [SelectionBase]
+[RequireComponent(typeof(CapsuleCollider))]
 public class CharacterMotor : MonoBehaviour
 {
     [Header("Dependencies")]
     public Camera playerCamera;
     public Rigidbody playerRigidbody;
-    public Collider playerCollider;
+    public CapsuleCollider playerCollider;
 
     [Header("Input")]
     private Vector3 moveWish;
@@ -32,7 +33,6 @@ public class CharacterMotor : MonoBehaviour
 
     [Header("Ground Check")]
     public bool isGrounded;
-    public float groundCheckLengthMultiplier = 2.0f;
     [SerializeField]
     private Collider groundCol;
     [SerializeField]
@@ -91,45 +91,84 @@ public class CharacterMotor : MonoBehaviour
         return prevVelocity + accelDir * accelVel;
     }
 
+    RaycastHit[] groundCheckHits = new RaycastHit[32];
+    int groundCheckHitCount;
+
     // Returns the collider that the player is standing on
     private Collider QueryGroundCheck(out Vector3 groundPoint, out Vector3 groundNormal)
     {
-        Collider groundCollider = null;
         groundPoint = Vector3.zero;
         groundNormal = Vector3.zero;
         RaycastHit groundHit;
 
-        var hits = playerRigidbody.SweepTestAll(Vector3.down, Mathf.Abs(Physics.gravity.y * Time.fixedDeltaTime * groundCheckLengthMultiplier), QueryTriggerInteraction.Ignore);
-        hits = hits.OrderByDescending(x => x.distance).Reverse().ToArray();
-        foreach(var hit in hits)
+        var castOrigin = transform.TransformPoint(playerCollider.center);
+        float groundCheckRayLength = playerCollider.height / 2.0f + Mathf.Max(0, velocity.y * Time.fixedDeltaTime);
+
+        // FIRST PASS: prioritize what's immediately below us
+
+        // TODO: remove magic value for cast direction (should change with gravity)
+        var rayHits = Physics.RaycastAll(castOrigin, Vector3.down, groundCheckRayLength, groundCheckLayer, QueryTriggerInteraction.Ignore);
+
+        rayHits = rayHits.OrderByDescending(x => x.distance).Reverse().ToArray();
+        for (int i = 0; i < rayHits.Length; ++i)
         {
-            if((hit.collider != playerCollider))
+            var hit = rayHits[i];
+            if ((hit.collider != playerCollider))
             {
                 groundHit = hit;
                 groundPoint = hit.point;
                 groundNormal = hit.normal;
+
                 return hit.collider;
             }
         }
 
-        return groundCollider;
+        // SECOND PASS: prioritize what's below the volume of the player
+
+        // TODO: remove magic value for collider
+        groundCheckHitCount = Physics.SphereCastNonAlloc(transform.TransformPoint(playerCollider.center),
+                                                         playerCollider.radius,
+                                                         Vector3.down,
+                                                         groundCheckHits,
+                                                         groundCheckRayLength - playerCollider.radius,
+                                                         groundCheckLayer,
+                                                         QueryTriggerInteraction.Ignore);
+
+        GizmosEx.DrawSphere(transform.TransformPoint(playerCollider.center), playerCollider.radius, Color.cyan);
+        Debug.DrawRay(transform.TransformPoint(playerCollider.center), Vector3.down * groundCheckRayLength, Color.red);
+
+        groundCheckHits = groundCheckHits.OrderByDescending(x => x.distance).Reverse().ToArray();
+        for (int i = 0; i < groundCheckHitCount; ++i)
+        {
+            var hit = groundCheckHits[i];
+            if ((hit.collider != playerCollider))
+            {
+                groundHit = hit;
+                groundPoint = hit.point;
+                groundNormal = hit.normal;
+
+                return hit.collider;
+            }
+        }
+
+        return null;
     }
 
     private void Start()
     {
-        Vector3 potentialPosition = playerRigidbody.position;
-        var hits = Physics.RaycastAll(playerCollider.bounds.center, Vector3.down, playerCollider.bounds.extents.y + Physics.defaultContactOffset, groundCheckLayer, QueryTriggerInteraction.Ignore);
-        float mtvDist;
-        Vector3 mtv;
-        foreach(var hit in hits)
-        {
-            bool pen = Physics.ComputePenetration(playerCollider, transform.position, transform.rotation, hit.collider, hit.transform.position, hit.transform.rotation, out mtv, out mtvDist);
-            if(pen)
-            {
-                potentialPosition += mtv * (mtvDist + Physics.defaultContactOffset);
-            }
-        }
-        playerRigidbody.MovePosition(potentialPosition);
+        // Vector3 potentialPosition = playerRigidbody.position;
+        // var hits = Physics.RaycastAll(playerCollider.bounds.center, Vector3.down, playerCollider.bounds.extents.y + Physics.defaultContactOffset, groundCheckLayer, QueryTriggerInteraction.Ignore);
+        // float mtvDist;
+        // Vector3 mtv;
+        // foreach(var hit in hits)
+        // {
+        //     bool pen = Physics.ComputePenetration(playerCollider, transform.position, transform.rotation, hit.collider, hit.transform.position, hit.transform.rotation, out mtv, out mtvDist);
+        //     if(pen)
+        //     {
+        //         potentialPosition += mtv * (mtvDist + Physics.defaultContactOffset);
+        //     }
+        // }
+        // playerRigidbody.MovePosition(potentialPosition);
     }
 
     private void Update()
@@ -150,17 +189,18 @@ public class CharacterMotor : MonoBehaviour
     {
         // determine grounded status
         Vector3 groundPoint;
+        Vector3 initialPosition = transform.position;
         Vector3 potentialPosition = transform.position;
         bool wasGrounded = isGrounded;
         isGrounded = (groundCol = QueryGroundCheck(out groundPoint, out groundNorm)) != null;
         if(isGrounded)
         {
             Vector3 closestOnPlayer = playerCollider.ClosestPoint(groundPoint);
-            GizmosEx.DrawSphere(closestOnPlayer, 0.1f, Color.green);
-            GizmosEx.DrawSphere(groundPoint, 0.1f, Color.red);
-            Vector3 offset = closestOnPlayer - transform.position;
-            GizmosEx.DrawSphere(groundPoint - offset, 0.05f, Color.blue);
-            potentialPosition = (groundPoint - offset);
+            //GizmosEx.DrawSphere(closestOnPlayer, 0.1f, Color.green);
+            //GizmosEx.DrawSphere(groundPoint, 0.1f, Color.red);
+            Vector3 offset = closestOnPlayer - potentialPosition;
+            //GizmosEx.DrawSphere(groundPoint - offset, 0.05f, Color.blue);
+            potentialPosition = groundPoint - offset;
         }
         if(!wasGrounded && isGrounded)
         {
@@ -241,28 +281,26 @@ public class CharacterMotor : MonoBehaviour
 
         CommitMove:
 
-        // finally: move the player to the end result
-        potentialPosition += -Physics.gravity.normalized * Physics.defaultContactOffset;
-
-        Debug.AssertFormat(velocity.magnitude > 0 || (playerRigidbody.position == potentialPosition),
+        Debug.AssertFormat(velocity.magnitude > 0 || (transform.position == potentialPosition),
                            this, "CurrentPosition {0} != potentialPosition {1} but velocity is zero! Difference is {2}.",
                            playerRigidbody.position, potentialPosition, (playerRigidbody.position - potentialPosition).ToString("F7"));
 
+        // finally: move the player to the end result
         playerRigidbody.position = potentialPosition;
 
-        Debug.DrawRay(playerRigidbody.position, groundNorm * 3.0f, Color.yellow);
+        Debug.DrawRay(playerRigidbody.position, groundNorm * 0.5f, Color.yellow);
     }
 
     private void Reset()
     {
         playerRigidbody = GetComponent<Rigidbody>();
-        playerCollider = GetComponent<Collider>();
+        playerCollider = GetComponent<CapsuleCollider>();
     }
 
     private void DrawGizmo(bool selected)
     {
         Gizmos.color = isGrounded ? Color.green : Color.red;
-        Gizmos.DrawRay(transform.position, Vector3.down * Mathf.Abs(Physics.gravity.y * Time.fixedDeltaTime * groundCheckLengthMultiplier));
+        Gizmos.DrawRay(transform.position, isGrounded ? groundNorm : Vector3.up);
 
         Gizmos.color = Color.blue;
         Gizmos.DrawSphere(playerCollider.bounds.center, 0.1f);
