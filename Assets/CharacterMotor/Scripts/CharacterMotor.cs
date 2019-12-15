@@ -26,6 +26,7 @@ public class CharacterMotor : MonoBehaviour
     public float groundFriction = 11;
     public float groundAcceleration = 50;
     public float groundMaxSpeed = 5.0f;
+    // TODO: max ground angle!
 
     public float airAcceleration = 8;
     public float airMaxSpeed = 300.0f;
@@ -40,6 +41,14 @@ public class CharacterMotor : MonoBehaviour
     [SerializeField]
     private Vector3 groundNorm;
 
+    Vector3 MovementNormal
+    {
+        get
+        {
+            return isGrounded ? groundNorm : Vector3.up;
+        }
+    }
+
     // Returns the direction that the character will move in given a controller-space input
     // controllerDir: direction of controller input
     // maxMagnitude: maximum magnitude of the returned vector
@@ -47,7 +56,6 @@ public class CharacterMotor : MonoBehaviour
     {
         controllerDir = controllerDir.normalized * Mathf.Min(maxMagnitude, controllerDir.magnitude);
         controllerDir = Quaternion.Euler(0, playerCamera.transform.eulerAngles.y, 0) * controllerDir;
-        controllerDir = Vector3.ProjectOnPlane(controllerDir, groundNorm);
 
         return controllerDir;
     }
@@ -91,10 +99,8 @@ public class CharacterMotor : MonoBehaviour
         return prevVelocity + accelDir * accelVel;
     }
 
-    RaycastHit[] groundCheckHits = new RaycastHit[32];
-    int groundCheckHitCount;
-
     // Returns the collider that the player is standing on
+    // TODO: refactor this to be non-stateful
     private Collider QueryGroundCheck(out Vector3 groundPoint, out Vector3 groundNormal)
     {
         groundPoint = Vector3.zero;
@@ -102,12 +108,13 @@ public class CharacterMotor : MonoBehaviour
         RaycastHit groundHit;
 
         var castOrigin = transform.TransformPoint(playerCollider.center);
-        float groundCheckRayLength = playerCollider.height / 2.0f + Mathf.Max(0, velocity.y * Time.fixedDeltaTime);
+        float groundCheckRayLength = playerCollider.height / 2.0f + Mathf.Max(-Physics.gravity.y * Time.deltaTime, velocity.y * Time.deltaTime);
 
         // FIRST PASS: prioritize what's immediately below us
 
         // TODO: remove magic value for cast direction (should change with gravity)
         var rayHits = Physics.RaycastAll(castOrigin, Vector3.down, groundCheckRayLength, groundCheckLayer, QueryTriggerInteraction.Ignore);
+        Debug.DrawRay(transform.TransformPoint(playerCollider.center), Vector3.down * groundCheckRayLength, Color.red);
 
         rayHits = rayHits.OrderByDescending(x => x.distance).Reverse().ToArray();
         for (int i = 0; i < rayHits.Length; ++i)
@@ -126,19 +133,51 @@ public class CharacterMotor : MonoBehaviour
         // SECOND PASS: prioritize what's below the volume of the player
 
         // TODO: remove magic value for collider
-        groundCheckHitCount = Physics.SphereCastNonAlloc(transform.TransformPoint(playerCollider.center),
+        var groundCheckHits = Physics.SphereCastAll(transform.TransformPoint(playerCollider.center),
                                                          playerCollider.radius,
                                                          Vector3.down,
-                                                         groundCheckHits,
                                                          groundCheckRayLength - playerCollider.radius,
                                                          groundCheckLayer,
                                                          QueryTriggerInteraction.Ignore);
-
-        GizmosEx.DrawSphere(transform.TransformPoint(playerCollider.center), playerCollider.radius, Color.cyan);
-        Debug.DrawRay(transform.TransformPoint(playerCollider.center), Vector3.down * groundCheckRayLength, Color.red);
+        GizmosEx.DrawSphere(transform.TransformPoint(playerCollider.center) + Vector3.down * (groundCheckRayLength - playerCollider.radius), playerCollider.radius, Color.cyan);
 
         groundCheckHits = groundCheckHits.OrderByDescending(x => x.distance).Reverse().ToArray();
-        for (int i = 0; i < groundCheckHitCount; ++i)
+        for (int i = 0; i < groundCheckHits.Length; ++i)
+        {
+            var hit = groundCheckHits[i];
+            if ((hit.collider != playerCollider))
+            {
+                groundHit = hit;
+                groundPoint = hit.point;
+                groundNormal = hit.normal;
+
+                return hit.collider;
+            }
+        }
+
+        return null;
+    }
+
+    private Collider QueryGroundingGroundCheck(out Vector3 groundPoint, out Vector3 groundNormal)
+    {
+        groundPoint = Vector3.zero;
+        groundNormal = Vector3.zero;
+        RaycastHit groundHit;
+
+        var castOrigin = transform.TransformPoint(playerCollider.center);
+        float groundCheckRayLength = playerCollider.height / 2.0f + Mathf.Max(-Physics.gravity.y * Time.deltaTime, velocity.y * Time.deltaTime);
+
+        // TODO: remove magic value for collider
+        var groundCheckHits = Physics.SphereCastAll(transform.TransformPoint(playerCollider.center),
+                                                         playerCollider.radius,
+                                                         Vector3.down,
+                                                         groundCheckRayLength - playerCollider.radius,
+                                                         groundCheckLayer,
+                                                         QueryTriggerInteraction.Ignore);
+        GizmosEx.DrawSphere(transform.TransformPoint(playerCollider.center) + Vector3.down * (groundCheckRayLength - playerCollider.radius), playerCollider.radius, Color.cyan);
+
+        groundCheckHits = groundCheckHits.OrderByDescending(x => x.distance).Reverse().ToArray();
+        for (int i = 0; i < groundCheckHits.Length; ++i)
         {
             var hit = groundCheckHits[i];
             if ((hit.collider != playerCollider))
@@ -193,25 +232,22 @@ public class CharacterMotor : MonoBehaviour
         Vector3 potentialPosition = transform.position;
         bool wasGrounded = isGrounded;
         isGrounded = (groundCol = QueryGroundCheck(out groundPoint, out groundNorm)) != null;
+
         if(isGrounded)
         {
-            Vector3 closestOnPlayer = playerCollider.ClosestPoint(groundPoint);
-            //GizmosEx.DrawSphere(closestOnPlayer, 0.1f, Color.green);
-            //GizmosEx.DrawSphere(groundPoint, 0.1f, Color.red);
-            Vector3 offset = closestOnPlayer - potentialPosition;
-            //GizmosEx.DrawSphere(groundPoint - offset, 0.05f, Color.blue);
-            potentialPosition = groundPoint - offset;
-        }
-        if(!wasGrounded && isGrounded)
-        {
-            velocity.y = 0.0f;
-            Debug.Log("[MOTOR] Landing detected.");
-        }
+            Vector3 groundAlignmentPoint;
+            Vector3 groundAlignmentNorm;
+            var groundAlignmentCollider = QueryGroundingGroundCheck(out groundAlignmentPoint, out groundAlignmentNorm);
 
-        // process handle player input
-        Vector3 worldDir = ControllerToWorldDirection(moveWish);
-        worldDir = worldDir.magnitude > 0 ? Vector3.ProjectOnPlane(worldDir, isGrounded ? groundNorm : Vector3.up) :
-                                            Vector3.zero;
+            Debug.LogError("LOOK HERE");
+            Vector3 closestOnPlayer = playerCollider.ClosestPoint(groundAlignmentPoint);
+            GizmosEx.DrawSphere(closestOnPlayer, 0.1f, Color.green);
+            GizmosEx.DrawSphere(groundAlignmentPoint, 0.1f, Color.red);
+            Vector3 offset = closestOnPlayer - transform.position;
+            GizmosEx.DrawSphere(groundAlignmentPoint - offset, 0.05f, Color.blue);
+            potentialPosition = (groundAlignmentPoint - offset);
+            Debug.Log(offset.ToStringPrecision());
+        }
 
         if (jumpWish)
         {
@@ -220,6 +256,7 @@ public class CharacterMotor : MonoBehaviour
                 Debug.Log("[MOTOR] Jumping! Now airborne.");
                 isGrounded = false;
                 velocity.y = 9.8f;
+                potentialPosition.y += velocity.y * Time.fixedDeltaTime; // HACK
                 jumpWish = false;
             }
             else
@@ -227,6 +264,16 @@ public class CharacterMotor : MonoBehaviour
                 jumpWish = canQueueJump || false;
             }
         }
+
+        if (!wasGrounded && isGrounded)
+        {
+            velocity.y = 0.0f;
+            Debug.Log("[MOTOR] Landing detected.");
+        }
+
+        // process handle player input
+        Vector3 worldDir = ControllerToWorldDirection(moveWish);
+        worldDir = worldDir.magnitude > 0 ? Vector3.ProjectOnPlane(worldDir, MovementNormal) : Vector3.zero;
 
         if(isGrounded)
         {
@@ -279,19 +326,17 @@ public class CharacterMotor : MonoBehaviour
                 }
             }
 
+            //Debug.Log(finalMTV.ToStringPrecision());
+
             potentialPosition += finalMTV;
         }
 
         CommitMove:
 
-        Debug.AssertFormat(velocity.magnitude > 0 || (transform.position == potentialPosition),
-                           this, "CurrentPosition {0} != potentialPosition {1} but velocity is zero! Difference is {2}.",
-                           playerRigidbody.position, potentialPosition, (playerRigidbody.position - potentialPosition).ToString("F7"));
-
         // finally: move the player to the end result
         playerRigidbody.position = potentialPosition;
 
-        Debug.DrawRay(playerRigidbody.position, groundNorm * 0.5f, Color.yellow);
+        //Debug.DrawRay(playerRigidbody.position, groundNorm * 0.5f, Color.yellow);
     }
 
     private void Reset()
@@ -323,5 +368,32 @@ public class CharacterMotor : MonoBehaviour
         }
 
         return true;
+    }
+}
+
+public static class Vector3Extensions
+{
+    public static string ToStringPrecision(this Vector3 v3, int precisionLevel=9)
+    {
+        string returnValue = "(";
+
+        for (int i = 0; i < 2; ++i)
+        {
+            returnValue += v3[i].ToString("G" + precisionLevel) + ", ";
+        }
+
+        returnValue += v3[2].ToString("G" + precisionLevel) + ")";
+
+        return returnValue;
+    }
+
+    public static Vector3 Scaled(this Vector3 target, Vector3 scaling)
+    {
+        return new Vector3(target.x * scaling.x, target.y * scaling.y, target.z * scaling.z);
+    }
+
+    public static Vector3 Scaled(this Vector3 target, float x, float y, float z)
+    {
+        return new Vector3(target.x * x, target.y * y, target.z * z);
     }
 }
