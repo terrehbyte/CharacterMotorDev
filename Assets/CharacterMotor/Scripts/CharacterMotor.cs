@@ -235,7 +235,10 @@ public class CharacterMotor : MonoBehaviour
         else
         {
             velocity = MoveAir(worldDir, velocity, airAcceleration, airMaxSpeed);
-            velocity = Accelerate(Physics.gravity.normalized, velocity, Physics.gravity.magnitude * gravityMultiplier, float.MaxValue );
+            if (playerRigidbody.useGravity)
+            {
+                velocity = Accelerate(Physics.gravity.normalized, velocity, Physics.gravity.magnitude * gravityMultiplier, float.MaxValue);
+            }
         }
 
         if (velocity.magnitude * velocity.magnitude * 0.5 < Physics.sleepThreshold)
