@@ -26,6 +26,7 @@ public class CharacterMotor : MonoBehaviour
     public float groundFriction = 11;
     public float groundAcceleration = 50;
     public float groundMaxSpeed = 5.0f;
+    public float groundMaxAngle = 90.0f;
     // TODO: max ground angle!
 
     public float airAcceleration = 8;
@@ -120,7 +121,7 @@ public class CharacterMotor : MonoBehaviour
         for (int i = 0; i < rayHits.Length; ++i)
         {
             var hit = rayHits[i];
-            if ((hit.collider != playerCollider))
+            if ((hit.collider != playerCollider)&& Vector3.Angle(Vector3.up, hit.normal) <= groundMaxAngle)
             {
                 groundHit = hit;
                 groundPoint = hit.point;
@@ -145,7 +146,7 @@ public class CharacterMotor : MonoBehaviour
         for (int i = 0; i < groundCheckHits.Length; ++i)
         {
             var hit = groundCheckHits[i];
-            if ((hit.collider != playerCollider))
+            if ((hit.collider != playerCollider) && Vector3.Angle(Vector3.up, hit.normal) <= groundMaxAngle)
             {
                 groundHit = hit;
                 groundPoint = hit.point;
@@ -180,7 +181,7 @@ public class CharacterMotor : MonoBehaviour
         for (int i = 0; i < groundCheckHits.Length; ++i)
         {
             var hit = groundCheckHits[i];
-            if ((hit.collider != playerCollider))
+            if ((hit.collider != playerCollider) && Vector3.Angle(Vector3.up, hit.normal) <= groundMaxAngle && hit.point != Vector3.zero)
             {
                 groundHit = hit;
                 groundPoint = hit.point;
@@ -191,23 +192,6 @@ public class CharacterMotor : MonoBehaviour
         }
 
         return null;
-    }
-
-    private void Start()
-    {
-        // Vector3 potentialPosition = playerRigidbody.position;
-        // var hits = Physics.RaycastAll(playerCollider.bounds.center, Vector3.down, playerCollider.bounds.extents.y + Physics.defaultContactOffset, groundCheckLayer, QueryTriggerInteraction.Ignore);
-        // float mtvDist;
-        // Vector3 mtv;
-        // foreach(var hit in hits)
-        // {
-        //     bool pen = Physics.ComputePenetration(playerCollider, transform.position, transform.rotation, hit.collider, hit.transform.position, hit.transform.rotation, out mtv, out mtvDist);
-        //     if(pen)
-        //     {
-        //         potentialPosition += mtv * (mtvDist + Physics.defaultContactOffset);
-        //     }
-        // }
-        // playerRigidbody.MovePosition(potentialPosition);
     }
 
     private void Update()
@@ -233,20 +217,26 @@ public class CharacterMotor : MonoBehaviour
         bool wasGrounded = isGrounded;
         isGrounded = (groundCol = QueryGroundCheck(out groundPoint, out groundNorm)) != null;
 
-        if(isGrounded)
+        if (isGrounded)
         {
             Vector3 groundAlignmentPoint;
             Vector3 groundAlignmentNorm;
             var groundAlignmentCollider = QueryGroundingGroundCheck(out groundAlignmentPoint, out groundAlignmentNorm);
 
-            Debug.LogError("LOOK HERE");
-            Vector3 closestOnPlayer = playerCollider.ClosestPoint(groundAlignmentPoint);
-            GizmosEx.DrawSphere(closestOnPlayer, 0.1f, Color.green);
-            GizmosEx.DrawSphere(groundAlignmentPoint, 0.1f, Color.red);
-            Vector3 offset = closestOnPlayer - transform.position;
-            GizmosEx.DrawSphere(groundAlignmentPoint - offset, 0.05f, Color.blue);
-            potentialPosition = (groundAlignmentPoint - offset);
-            Debug.Log(offset.ToStringPrecision());
+            if (groundAlignmentCollider != null)
+            {
+                Vector3 closestOnPlayer = playerCollider.ClosestPoint(groundAlignmentPoint);
+                GizmosEx.DrawSphere(closestOnPlayer, 0.1f, Color.green);
+                GizmosEx.DrawSphere(groundAlignmentPoint, 0.1f, Color.red);
+                Vector3 offset = closestOnPlayer - transform.position;
+                GizmosEx.DrawSphere(groundAlignmentPoint - offset, 0.05f, Color.blue);
+                potentialPosition = (groundAlignmentPoint - offset);
+
+                if (Vector3.Distance(initialPosition, potentialPosition) > 2.0f)
+                {
+                    Debug.LogFormat("{0} to {1}", initialPosition.ToString("F3"), potentialPosition.ToString("F3"));
+                }
+            }
         }
 
         if (jumpWish)
@@ -325,8 +315,6 @@ public class CharacterMotor : MonoBehaviour
                     finalMTV += mtv * mtvDist;
                 }
             }
-
-            //Debug.Log(finalMTV.ToStringPrecision());
 
             potentialPosition += finalMTV;
         }
