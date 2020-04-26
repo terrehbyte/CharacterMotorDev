@@ -1,0 +1,3 @@
+[submodule "Thirdparty/Microsoft.Unity.Analyzers"]
+	path = Thirdparty/Microsoft.Unity.Analyzers
+	url = https://github.com/microsoft/Microsoft.Unity.Analyzers.git

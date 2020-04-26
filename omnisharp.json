@@ -1,0 +1,8 @@
+{
+    "RoslynExtensionsOptions": {
+        "enableAnalyzersSupport": true,
+        "LocationPaths": [
+            "Thirdparty/Microsoft.Unity.Analyzers/src/Microsoft.Unity.Analyzers/bin/Release/netstandard2.0/"
+        ]
+    }
+}
