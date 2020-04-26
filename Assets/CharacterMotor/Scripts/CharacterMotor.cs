@@ -22,7 +22,9 @@ public class CharacterMotor : MonoBehaviour
     [Header("Movement")]
     public Vector3 velocity;
     public bool shouldCollide = true;
+    public bool forceNoCollision = false;
 
+    public bool groundAdhesion = true;
     public float groundFriction = 11;
     public float groundAcceleration = 50;
     public float groundMaxSpeed = 5.0f;
@@ -56,9 +58,13 @@ public class CharacterMotor : MonoBehaviour
     public Vector3 ControllerToWorldDirection(Vector3 controllerDir, float maxMagnitude = 1)
     {
         controllerDir = controllerDir.normalized * Mathf.Min(maxMagnitude, controllerDir.magnitude);
-        controllerDir = Quaternion.Euler(0, playerCamera.transform.eulerAngles.y, 0) * controllerDir;
 
         return controllerDir;
+    }
+
+    public Vector3 RotateByCameraYaw(Vector3 dir)
+    {
+        return Quaternion.Euler(0, playerCamera.transform.eulerAngles.y, 0) * dir;
     }
 
     // Returns the player's new velocity when moving on the ground
@@ -127,6 +133,7 @@ public class CharacterMotor : MonoBehaviour
                 groundPoint = hit.point;
                 groundNormal = hit.normal;
 
+                //Debug.Log("[MOTOR] Ground is immediately below the player: " + hit.collider.name);
                 return hit.collider;
             }
         }
@@ -146,12 +153,15 @@ public class CharacterMotor : MonoBehaviour
         for (int i = 0; i < groundCheckHits.Length; ++i)
         {
             var hit = groundCheckHits[i];
-            if ((hit.collider != playerCollider) && Vector3.Angle(Vector3.up, hit.normal) <= groundMaxAngle)
+            if ((hit.collider != playerCollider) && Vector3.Angle(Vector3.up, hit.normal) <= groundMaxAngle && hit.point != Vector3.zero)
             {
                 groundHit = hit;
                 groundPoint = hit.point;
                 groundNormal = hit.normal;
 
+                GizmosEx.DrawSphere(groundHit.point, 0.35f, Color.green);
+
+                //Debug.Log("[MOTOR] Ground is around the player: " + hit.collider.name);
                 return hit.collider;
             }
         }
@@ -194,6 +204,50 @@ public class CharacterMotor : MonoBehaviour
         return null;
     }
 
+    private Vector3[] ResolveCollision(Vector3 otherPos, Vector3 otherVel, float otherMass, Vector3 normal)
+    {
+        const float elasticity = 0.5f;
+
+        Vector3 relativeVel = velocity - otherVel;
+        float impulseMag = Vector3.Dot(-(1.0f + elasticity) * relativeVel, normal) /
+                           Vector3.Dot(normal, normal * (1 / playerRigidbody.mass + 1 / otherMass));
+
+        // TODO: remove allocation
+        return new Vector3[] { velocity + (impulseMag / playerRigidbody.mass) * normal,
+                               otherVel - (impulseMag / otherMass) * normal };
+    }
+
+    private Vector3 ResolvePhysics(Transform otherTm, Rigidbody otherRb, Vector3 normal, float pen)
+    {
+        Vector3 otherVel;
+        float otherMass;
+        if(otherRb == null)
+        {
+            otherVel = Vector3.zero;
+            otherMass = Mathf.Infinity;
+        }
+        else
+        {
+            otherVel = otherRb.velocity;
+            otherMass = otherRb.mass;
+        }
+
+        var res = ResolveCollision(otherTm.position,
+                                   otherVel,
+                                   otherMass,
+                                   normal);
+
+        // TODO: should we resolve overlaps here?
+
+        // does the other object move?
+        if(otherRb != null && !otherRb.isKinematic)
+        {
+            otherRb.velocity = res[1];
+        }
+
+        return res[0];
+    }
+
     private void Update()
     {
         moveWish = new Vector3(Input.GetAxisRaw("Horizontal"), 0.0f, Input.GetAxisRaw("Vertical"));
@@ -207,7 +261,7 @@ public class CharacterMotor : MonoBehaviour
             jumpWish = jumpWish || Input.GetButtonDown("Jump");
         }
     }
-
+    
     private void FixedUpdate()
     {
         // determine grounded status
@@ -219,11 +273,8 @@ public class CharacterMotor : MonoBehaviour
 
         if (isGrounded)
         {
-            Vector3 groundAlignmentPoint;
-            Vector3 groundAlignmentNorm;
-            var groundAlignmentCollider = QueryGroundingGroundCheck(out groundAlignmentPoint, out groundAlignmentNorm);
-
-            if (groundAlignmentCollider != null)
+            var groundAlignmentCollider = QueryGroundingGroundCheck(out Vector3 groundAlignmentPoint, out Vector3 groundAlignmentNorm);
+            if (groundAlignmentCollider != null && groundAdhesion)
             {
                 Vector3 closestOnPlayer = playerCollider.ClosestPoint(groundAlignmentPoint);
                 GizmosEx.DrawSphere(closestOnPlayer, 0.1f, Color.green);
@@ -262,8 +313,7 @@ public class CharacterMotor : MonoBehaviour
         }
 
         // process handle player input
-        Vector3 worldDir = ControllerToWorldDirection(moveWish);
-        worldDir = worldDir.magnitude > 0 ? Vector3.ProjectOnPlane(worldDir, MovementNormal) : Vector3.zero;
+        Vector3 worldDir = ControllerToWorldDirection(RotateByCameraYaw(moveWish));
 
         if(isGrounded)
         {
@@ -285,7 +335,7 @@ public class CharacterMotor : MonoBehaviour
 
         // determine estimated displacement
         Vector3 displacement = velocity * Time.deltaTime;
-        potentialPosition = potentialPosition + displacement;
+        potentialPosition += displacement;
 
         if(shouldCollide)
         {
@@ -310,19 +360,28 @@ public class CharacterMotor : MonoBehaviour
                 float mtvDist;
                 Vector3 mtv;
                 bool pen = Physics.ComputePenetration(playerCollider, potentialPosition, transform.rotation, candidate, candidate.transform.position, candidate.transform.rotation, out mtv, out mtvDist);
+                ResolvePhysics(candidate.transform, candidate.GetComponent<Rigidbody>(), mtv.normalized, mtvDist);
                 if(pen && mtvDist > Physics.defaultContactOffset)
                 {
                     finalMTV += mtv * mtvDist;
                 }
             }
 
-            potentialPosition += finalMTV;
+            if (!forceNoCollision)
+            {
+                potentialPosition += finalMTV;
+            }
         }
 
         CommitMove:
 
         // finally: move the player to the end result
         playerRigidbody.position = potentialPosition;
+
+        // clip the player's velocity on XZ plane
+        // velocity.x = (potentialPosition.x - initialPosition.x) / Time.deltaTime;
+        // velocity.z = (potentialPosition.z - initialPosition.z) / Time.deltaTime;
+    
 
         //Debug.DrawRay(playerRigidbody.position, groundNorm * 0.5f, Color.yellow);
     }
