@@ -52,6 +52,14 @@ public class CharacterMotor : MonoBehaviour
         }
     }
 
+    public Vector3 playerCenterWorld
+    {
+        get
+        {
+            return transform.TransformPoint(playerCollider.center);
+        }
+    }
+
     // Returns the direction that the character will move in given a controller-space input
     // controllerDir: direction of controller input
     // maxMagnitude: maximum magnitude of the returned vector
@@ -104,6 +112,25 @@ public class CharacterMotor : MonoBehaviour
         }
 
         return prevVelocity + accelDir * accelVel;
+    }
+
+    private Vector3 ClipVelocity(Vector3 velocity, Vector3 collisionNormal, float overbounce = 1.0f)
+    {
+        float backoff = Vector3.Dot(velocity, collisionNormal) * overbounce;
+
+        Vector3 clipped = new Vector3();
+
+        for (int i = 0; i < 3; ++i)
+        {
+            float change = collisionNormal[i] * backoff;
+            clipped[i] = velocity[i] - change;
+            if(clipped[i] > float.Epsilon && clipped[i] < float.Epsilon)
+            {
+                clipped[i] = 0.0f;
+            }
+        }
+
+        return clipped;
     }
 
     // Returns the collider that the player is standing on
@@ -281,7 +308,7 @@ public class CharacterMotor : MonoBehaviour
                 GizmosEx.DrawSphere(groundAlignmentPoint, 0.1f, Color.red);
                 Vector3 offset = closestOnPlayer - transform.position;
                 GizmosEx.DrawSphere(groundAlignmentPoint - offset, 0.05f, Color.blue);
-                potentialPosition = (groundAlignmentPoint - offset);
+                potentialPosition = groundAlignmentPoint - offset;
 
                 if (Vector3.Distance(initialPosition, potentialPosition) > 2.0f)
                 {
@@ -334,32 +361,28 @@ public class CharacterMotor : MonoBehaviour
         }
 
         // determine estimated displacement
-        Vector3 displacement = velocity * Time.deltaTime;
-        potentialPosition += displacement;
+        Vector3 preliminaryDisplacement = velocity * Time.deltaTime;
+        Vector3 preliminaryPosition = potentialPosition;
 
         if(shouldCollide)
         {
             // first test: where would we end up if we moved directly?
-            var hits = Physics.RaycastAll(transform.position, displacement, displacement.magnitude, groundCheckLayer, QueryTriggerInteraction.Ignore);
-            potentialPosition = (hits.Length > 0 ? hits.OrderByDescending(x => x.distance).Last().point : potentialPosition);
-            Vector3 offsetFromCenter = playerCollider.bounds.center - transform.position;
-
-            // could we potentially overlap w/ something near us?
-            var candidates = Physics.OverlapBox(potentialPosition + offsetFromCenter, playerCollider.bounds.extents, transform.rotation, groundCheckLayer, QueryTriggerInteraction.Ignore);
-            if(candidates.Length == 0)
-            {
-                // exit early if nothing is overlapping
-                goto CommitMove;
-            }
+            // var hits = Physics.RaycastAll(initialPosition, preliminaryDisplacement, preliminaryDisplacement.magnitude, groundCheckLayer, QueryTriggerInteraction.Ignore);
+            // potentialPosition = hits.Length > 0 ? hits.OrderByDescending(x => x.distance).Last().point : potentialPosition;
+            // Vector3 offsetFromCenter = playerCollider.bounds.center - initialPosition;
 
             // second test: depenetrate player from any overlapping geometry
             // attempt to move player away from contacts
+
+            // could we potentially overlap w/ something near us?
+            var candidates = Physics.OverlapBox(initialPosition, playerCollider.bounds.extents, transform.rotation, groundCheckLayer, QueryTriggerInteraction.Ignore);
             Vector3 finalMTV = Vector3.zero;
             foreach(var candidate in candidates)
             {
                 float mtvDist;
                 Vector3 mtv;
                 bool pen = Physics.ComputePenetration(playerCollider, potentialPosition, transform.rotation, candidate, candidate.transform.position, candidate.transform.rotation, out mtv, out mtvDist);
+                // TODO: this is JANK, need to fix -- review HL2 physics prop interactions
                 ResolvePhysics(candidate.transform, candidate.GetComponent<Rigidbody>(), mtv.normalized, mtvDist);
                 if(pen && mtvDist > Physics.defaultContactOffset)
                 {
@@ -369,21 +392,33 @@ public class CharacterMotor : MonoBehaviour
 
             if (!forceNoCollision)
             {
-                potentialPosition += finalMTV;
+                preliminaryPosition += finalMTV;
+            }
+
+            // time to slide!
+            var sweepHits = Physics.CapsuleCastAll(initialPosition + (Vector3.up * (playerCollider.height / 2.0f + playerCollider.radius)),
+                                                   initialPosition + (Vector3.up * playerCollider.radius),
+                                                   playerCollider.radius - Physics.defaultContactOffset,
+                                                   velocity.normalized,
+                                                   velocity.magnitude * Time.deltaTime,
+                                                   groundCheckLayer,
+                                                   QueryTriggerInteraction.Ignore);
+
+            foreach (var hit in sweepHits)
+            {
+                if(hit.point == Vector3.zero)
+                {
+                    Debug.LogWarningFormat("Player was overlapping with {0} with a normal of {1} when they were sliding! Skipping...", hit.collider.name, hit.normal);
+                    GizmosEx.DrawSphere(potentialPosition, 0.1f, Color.magenta).expirationTime = Time.time + 10.0f;
+                    continue;
+                }
+                velocity = ClipVelocity(velocity, hit.normal);
             }
         }
 
-        CommitMove:
-
         // finally: move the player to the end result
-        playerRigidbody.position = potentialPosition;
-
-        // clip the player's velocity on XZ plane
-        // velocity.x = (potentialPosition.x - initialPosition.x) / Time.deltaTime;
-        // velocity.z = (potentialPosition.z - initialPosition.z) / Time.deltaTime;
-    
-
-        //Debug.DrawRay(playerRigidbody.position, groundNorm * 0.5f, Color.yellow);
+        potentialPosition = preliminaryPosition + velocity * Time.deltaTime;
+        playerRigidbody.position = potentialPosition;    
     }
 
     private void Reset()

@@ -7,6 +7,8 @@ public class CharacterMotorDebug : MonoBehaviour
     [SerializeField]
     CharacterMotor motor;
     [SerializeField]
+    Transform playerTransform;
+    [SerializeField]
     UnityEngine.UI.Text reportedText;
     [SerializeField]
     UnityEngine.UI.Text estimateText;
@@ -16,19 +18,19 @@ public class CharacterMotorDebug : MonoBehaviour
 
     void Start()
     {
-        lastFixedPosition = motor.transform.position;
+        lastFixedPosition = playerTransform.transform.position;
     }
 
     void Update()
     {
-        reportedText.text = (motor.velocity.Scaled(1,0,1).magnitude.ToString("0.00"));
-        estimateText.text = (estimatedXZspeed.ToString("0.00"));
+        reportedText.text = motor.velocity.Scaled(1,0,1).magnitude.ToString("0.00");
+        estimateText.text = estimatedXZspeed.ToString("0.00");
 
     }
 
     void FixedUpdate()
     {
-        estimatedXZspeed = (motor.transform.position - lastFixedPosition).Scaled(1, 0, 1).magnitude / Time.deltaTime;
-        lastFixedPosition = motor.transform.position;
+        estimatedXZspeed = (playerTransform.transform.position - lastFixedPosition).Scaled(1, 0, 1).magnitude / Time.deltaTime;
+        lastFixedPosition = playerTransform.transform.position;
     }
 }
