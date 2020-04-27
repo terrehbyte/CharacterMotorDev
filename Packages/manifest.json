@@ -1,6 +1,6 @@
 {
   "dependencies": {
-    "com.tb.moregizmos": "https://github.com/terrehbyte/MoreGizmos.git",
+    "com.tb.moregizmos": "https://github.com/terrehbyte/MoreGizmos.git#master",
     "com.unity.cinemachine": "2.2.8",
     "com.unity.package-manager-ui": "2.0.8",
     "com.unity.modules.ai": "1.0.0",
@@ -36,8 +36,8 @@
   },
   "lock": {
     "com.tb.moregizmos": {
-      "revision": "HEAD",
-      "hash": "f81dbefa7a034167c92beb9990ba3b49da6e0309"
+      "revision": "master",
+      "hash": "82918d28aa643969d83026635cfe99f695aa0185"
     }
   }
 }
