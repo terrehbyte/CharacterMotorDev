@@ -2,8 +2,12 @@
 [Tt]emp/
 [Ll]ibrary/
 [Oo]bj/
+[Uu]serSettings/
+
 *.csproj
 *.sln
+*.sln.DotSettings
 
 .vs/
 .vscode/
+.idea/
