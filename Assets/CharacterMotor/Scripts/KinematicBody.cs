@@ -34,7 +34,7 @@ public class KinematicBody : MonoBehaviour
     
     public Vector3 InternalVelocity { get; set; }
     public Vector3 Velocity { get; private set; }
-
+    
     public void CollideAndSlide(Vector3 bodyPosition, Quaternion bodyRotation, Vector3 bodyVelocity, Collider other)
     {
         DeferredCollideAndSlide(ref bodyPosition, ref bodyRotation, ref bodyVelocity, other);
@@ -76,7 +76,6 @@ public class KinematicBody : MonoBehaviour
     public Collider[] Overlap(Vector3 bodyPosition, Vector3 bodyHalfExtents, int layerMask = ~0, QueryTriggerInteraction queryMode = QueryTriggerInteraction.UseGlobal)
     {
         bodyPosition = GetCenterAtBodyPosition(bodyPosition);
-        // TODO: this needs to exclude itself from the list of overlaps
         return Physics.OverlapBox(bodyPosition, bodyHalfExtents, rbody.rotation, layerMask, queryMode);
     }
     
@@ -84,11 +83,7 @@ public class KinematicBody : MonoBehaviour
     {
         bodyPosition = GetCenterAtBodyPosition(bodyPosition);
         var allHits = Physics.BoxCastAll(bodyPosition, LocalBodySizeWithSkin/2, direction, rbody.rotation, distance, layerMask, queryMode);
-
-        // TODO: this is inefficient and generates garbage and needs to exclude itself from the list of overlaps
-        List<RaycastHit> filteredhits = new List<RaycastHit>(allHits);
-        filteredhits.RemoveAll( x => x.collider == col);
-        return filteredhits.ToArray();
+        return allHits;
     }
 
     public RaycastHit[] Trace(Vector3 startBodyPosition, Vector3 endBodyPosition, int layerMask = ~0, QueryTriggerInteraction queryMode = QueryTriggerInteraction.UseGlobal)
@@ -124,6 +119,29 @@ public class KinematicBody : MonoBehaviour
         Vector3 projectedPos = rbody.position + (InternalVelocity * Time.deltaTime);
         Vector3 projectedVel = InternalVelocity;
         Quaternion projectedRot = rbody.rotation;
+        
+        //
+        // sweep towards goal position
+        //
+        var sweepCandidates = Trace(startPosition, projectedPos, -1, QueryTriggerInteraction.Ignore);
+        for (int i = 0; i < sweepCandidates.Length; ++i)
+        {
+            var other = sweepCandidates[i].collider;
+
+            // ignore self collision
+            if(other == col) { continue; }
+
+            bool isOverlap = Physics.ComputePenetration(col,
+                projectedPos,
+                projectedRot,
+                other,
+                other.transform.position,
+                other.transform.rotation,
+                out var mtv,
+                out var pen);
+
+            motor.ResolveVelocity(ref projectedPos, ref projectedRot, ref projectedVel, other, mtv, pen);
+        }
 
         //
         // depenetrate from overlapping objects
@@ -208,6 +226,8 @@ public interface IKinematicMotor
     void OnResolveMove(ref Vector3 bodyPosition, ref Quaternion bodyRotation, ref Vector3 bodyVelocity, Collider other, Vector3 direction, float distance);
     void OnFinishMove(ref Vector3 projectedPos, ref Quaternion projectedRot, ref Vector3 projectedVel);
     void OnPostMove();
-    
+
+    void ResolvePosition(ref Vector3 bodyPosition, ref Quaternion bodyRotation, ref Vector3 bodyVelocity, Collider other, Vector3 direction, float distance);
+    void ResolveVelocity(ref Vector3 bodyPosition, ref Quaternion bodyRotation, ref Vector3 bodyVelocity, Collider other, Vector3 direction, float distance);
     Vector3 UpdateVelocity(Vector3 internalVelocity);
 }

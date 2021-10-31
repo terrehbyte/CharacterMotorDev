@@ -200,6 +200,41 @@ public class KinematicCharacterMotor : MonoBehaviour, IKinematicMotor
         }
     }
 
+    public void ResolvePosition(ref Vector3 curPosition, ref Quaternion curRotation, ref Vector3 curVelocity, Collider other, Vector3 direction, float pen)
+    {
+        // floor
+        if (groundLayers.Test(other.gameObject.layer) &&  // require ground layer
+            direction.y > 0 &&                                      // direction check
+            Vector3.Angle(direction, Vector3.up) < maxGroundAngle)  // angle check
+        {
+            // only change Y-position if bumping into the floor
+            curPosition.y += direction.y * (pen);
+        }
+        // other
+        else
+        {
+            curPosition += direction * (pen);
+        }
+    }
+
+    public void ResolveVelocity(ref Vector3 curPosition, ref Quaternion curRotation, ref Vector3 curVelocity, Collider other, Vector3 direction, float pen)
+    {
+        Vector3 clipped = ClipVelocity(curVelocity, direction);
+
+        // floor
+        if (groundLayers.Test(other.gameObject.layer) &&  // require ground layer
+            direction.y > 0 &&                                      // direction check
+            Vector3.Angle(direction, Vector3.up) < maxGroundAngle)  // angle check
+        {
+            curVelocity.y = clipped.y;
+        }
+        // other
+        else
+        {
+            curVelocity = clipped;
+        }
+    }
+
     public void OnPreMove()
     {
         // reset frame data
@@ -209,9 +244,11 @@ public class KinematicCharacterMotor : MonoBehaviour, IKinematicMotor
 
     public void OnFinishMove(ref Vector3 curPosition, ref Quaternion curRotation, ref Vector3 curVelocity)
     {
+        //
         // Ground Adhesion
+        //
 
-        // early exit if we're already grounded or jumping
+        // early exit if we're already grounded or jumping (or wasn't grounded previously)
         if (Grounded || JumpedThisFrame || !wasGrounded) return;
         
         var groundCandidates = body.Cast(curPosition, Vector3.down, maxGroundAdhesionDistance, groundLayers, QueryTriggerInteraction.Ignore);
@@ -219,7 +256,8 @@ public class KinematicCharacterMotor : MonoBehaviour, IKinematicMotor
         foreach (var candidate in groundCandidates)
         {
             // ignore colliders that we start inside of - it's either us or something bad happened
-            if(candidate.point == Vector3.zero) { continue; }
+            if(candidate.point == Vector3.zero ||
+               candidate.collider == body.BodyCollider) { continue; }
 
             // NOTE: This code assumes that the ground will always be below us
             snapPosition.y = candidate.point.y - body.FootOffset.y - body.contactOffset;
