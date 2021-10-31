@@ -169,7 +169,7 @@ public class KinematicCharacterMotor : MonoBehaviour, IKinematicMotor
 
         velocity += (moveWish * accelMag);
         
-        if (body.BodyRigidbody.useGravity)
+        if (!JumpedThisFrame && body.BodyRigidbody.useGravity)
         {
             velocity += EffectiveGravity * Time.deltaTime;
         }
@@ -219,6 +219,9 @@ public class KinematicCharacterMotor : MonoBehaviour, IKinematicMotor
 
     public void ResolveVelocity(ref Vector3 curPosition, ref Quaternion curRotation, ref Vector3 curVelocity, Collider other, Vector3 direction, float pen)
     {
+        // early exit if we're not penetrating deep enough
+        //if(pen < body.skinWidth) { return; }
+        
         Vector3 clipped = ClipVelocity(curVelocity, direction);
 
         // floor

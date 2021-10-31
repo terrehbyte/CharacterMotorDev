@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
@@ -19,7 +20,7 @@ public class KinematicBody : MonoBehaviour
 #pragma warning restore 0649 // assigned in Unity inspector
 
     public Vector3 LocalBodySize => col.size;
-    public Vector3 LocalBodySizeWithSkin => col.size + Vector3.one * contactOffset;
+    public Vector3 LocalBodySizeWithOffset => col.size + Vector3.one * contactOffset;
     
     public float contactOffset = 0.005f;
     public float skinWidth = 0.01f;
@@ -81,18 +82,31 @@ public class KinematicBody : MonoBehaviour
     
     public RaycastHit[] Cast(Vector3 bodyPosition, Vector3 direction, float distance, int layerMask = ~0, QueryTriggerInteraction queryMode = QueryTriggerInteraction.UseGlobal)
     {
+        return Cast(bodyPosition, direction, LocalBodySizeWithOffset / 2, distance, layerMask, queryMode);
+    }
+    
+    public RaycastHit[] Cast(Vector3 bodyPosition, Vector3 direction, Vector3 halfExtents, float distance, int layerMask = ~0, QueryTriggerInteraction queryMode = QueryTriggerInteraction.UseGlobal)
+    {
         bodyPosition = GetCenterAtBodyPosition(bodyPosition);
-        var allHits = Physics.BoxCastAll(bodyPosition, LocalBodySizeWithSkin/2, direction, rbody.rotation, distance, layerMask, queryMode);
+        var allHits = Physics.BoxCastAll(bodyPosition, halfExtents, direction, rbody.rotation, distance, layerMask, queryMode);
         return allHits;
     }
 
     public RaycastHit[] Trace(Vector3 startBodyPosition, Vector3 endBodyPosition, int layerMask = ~0, QueryTriggerInteraction queryMode = QueryTriggerInteraction.UseGlobal)
     {
+        return Trace(startBodyPosition, endBodyPosition, LocalBodySizeWithOffset/2, layerMask, queryMode);
+    }
+
+    public RaycastHit[] Trace(Vector3 startBodyPosition, Vector3 endBodyPosition, Vector3 halfExtents,
+        int layerMask = ~0, QueryTriggerInteraction queryMode = QueryTriggerInteraction.UseGlobal)
+    {
         Vector3 offset = endBodyPosition - startBodyPosition;
         float len = offset.magnitude;
 
         Vector3 dir = offset / len;
-        return Cast(startBodyPosition, dir, len, layerMask, queryMode);
+        if (len == 0.0f) { return Array.Empty<RaycastHit>(); }
+        Debug.Assert(Mathf.Approximately(dir.magnitude, 1.0f));
+        return Cast(startBodyPosition, dir, halfExtents, len, layerMask, queryMode);
     }
     
     //
@@ -123,24 +137,41 @@ public class KinematicBody : MonoBehaviour
         //
         // sweep towards goal position
         //
-        var sweepCandidates = Trace(startPosition, projectedPos, -1, QueryTriggerInteraction.Ignore);
-        for (int i = 0; i < sweepCandidates.Length; ++i)
+        const int MAX_SWEEP_ITERATIONS = 32;
+
+        for (int sweepNo = 0; sweepNo < MAX_SWEEP_ITERATIONS; ++sweepNo)
         {
-            var other = sweepCandidates[i].collider;
+            var sweepCandidates = Trace(startPosition, projectedPos, LocalBodySize/2, -1, QueryTriggerInteraction.Ignore);
+            if (sweepCandidates.Length == 0 ||
+                (sweepCandidates.Length == 1 && sweepCandidates[0].collider == col))
+            {
+                break;
+            }
+            
+            for (int i = 0; i < sweepCandidates.Length; ++i)
+            {
+                var other = sweepCandidates[i].collider;
 
-            // ignore self collision
-            if(other == col) { continue; }
+                // ignore self collision
+                if (other == col || sweepCandidates[i].point == Vector3.zero)
+                {
+                    continue;
+                }
 
-            bool isOverlap = Physics.ComputePenetration(col,
-                projectedPos,
-                projectedRot,
-                other,
-                other.transform.position,
-                other.transform.rotation,
-                out var mtv,
-                out var pen);
+                Debug.DrawRay(sweepCandidates[i].point, sweepCandidates[i].normal * 5.0f, Color.red);
+                
+                bool isOverlap = Physics.ComputePenetration(col,
+                    projectedPos,
+                    projectedRot,
+                    other,
+                    other.transform.position,
+                    other.transform.rotation,
+                    out var mtv,
+                    out var pen);
 
-            motor.ResolveVelocity(ref projectedPos, ref projectedRot, ref projectedVel, other, mtv, pen);
+                motor.ResolveVelocity(ref projectedPos, ref projectedRot, ref projectedVel, other, mtv, pen);
+                break;
+            }
         }
 
         //
@@ -160,10 +191,16 @@ public class KinematicBody : MonoBehaviour
         //       revert the change afterwards
         col.size = sizeWithSkin;
 
-        foreach (var candidate in candidates)
+        //Debug.DrawRay(rbody.position + Vector3.up, projectedVel * 5.0f, Color.magenta);
+
+        for (var index = 0; index < candidates.Length; index++)
         {
+            var candidate = candidates[index];
             DeferredCollideAndSlide(ref projectedPos, ref projectedRot, ref projectedVel, candidate);
+            //Debug.DrawRay(rbody.position + Vector3.up * (index+1), projectedVel * 4.0f);
         }
+
+        //Debug.DrawRay(rbody.position + Vector3.up, projectedVel * 5.0f, Color.green);
 
         // HACK: restoring size (see above HACK)
         col.size = sizeOriginal;
