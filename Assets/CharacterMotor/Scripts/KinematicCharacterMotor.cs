@@ -177,29 +177,6 @@ public class KinematicCharacterMotor : MonoBehaviour, IKinematicMotor
         return velocity;
     }
 
-    public void OnResolveMove(ref Vector3 curPosition, ref Quaternion curRotation, ref Vector3 curVelocity, Collider other, Vector3 direction, float pen)
-    {
-        Vector3 clipped = ClipVelocity(curVelocity, direction);
-
-        // floor
-        if (groundLayers.Test(other.gameObject.layer) &&  // require ground layer
-            direction.y > 0 &&                                      // direction check
-            Vector3.Angle(direction, Vector3.up) < maxGroundAngle)  // angle check
-        {
-            // only change Y-position if bumping into the floor
-            curPosition.y += direction.y * (pen);
-            curVelocity.y = clipped.y;
-            
-            Grounded = true;
-        }
-        // other
-        else
-        {
-            curPosition += direction * (pen);
-            curVelocity = clipped;
-        }
-    }
-
     public void ResolvePosition(ref Vector3 curPosition, ref Quaternion curRotation, ref Vector3 curVelocity, Collider other, Vector3 direction, float pen)
     {
         // floor
@@ -208,7 +185,8 @@ public class KinematicCharacterMotor : MonoBehaviour, IKinematicMotor
             Vector3.Angle(direction, Vector3.up) < maxGroundAngle)  // angle check
         {
             // only change Y-position if bumping into the floor
-            curPosition.y += direction.y * (pen);
+            curPosition.y += pen;
+            Grounded = true;
         }
         // other
         else
@@ -254,13 +232,14 @@ public class KinematicCharacterMotor : MonoBehaviour, IKinematicMotor
         // early exit if we're already grounded or jumping (or wasn't grounded previously)
         if (Grounded || JumpedThisFrame || !wasGrounded) return;
         
-        var groundCandidates = body.Cast(curPosition, Vector3.down, maxGroundAdhesionDistance, groundLayers, QueryTriggerInteraction.Ignore);
+        var groundCandidates = body.Cast(curPosition, Vector3.down, body.LocalBodySizeWithSkin/2, maxGroundAdhesionDistance, groundLayers, QueryTriggerInteraction.Ignore);
         Vector3 snapPosition = curPosition;
         foreach (var candidate in groundCandidates)
         {
             // ignore colliders that we start inside of - it's either us or something bad happened
             if(candidate.point == Vector3.zero ||
-               candidate.collider == body.BodyCollider) { continue; }
+               candidate.collider == body.BodyCollider)
+            { continue; }
 
             // NOTE: This code assumes that the ground will always be below us
             snapPosition.y = candidate.point.y - body.FootOffset.y - body.contactOffset;
