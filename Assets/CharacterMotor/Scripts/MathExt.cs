@@ -1,6 +1,6 @@
 ﻿using UnityEngine;
 
-public static class Utilities
+public static class MathExt
 {
     public static bool Test(this LayerMask mask, int other)
     {

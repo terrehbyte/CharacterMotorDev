@@ -3,6 +3,7 @@
 [Ll]ibrary/
 [Oo]bj/
 [Uu]serSettings/
+ProjectSettings/boot.config
 
 *.csproj
 *.sln
