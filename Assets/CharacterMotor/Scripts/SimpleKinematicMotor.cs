@@ -198,12 +198,10 @@ public class SimpleKinematicMotor : MonoBehaviour
         Debug.DrawRay(projectedPosition, effectiveVelocity.normalized * 5.0f, Color.cyan);
         
         projectedPosition += effectiveVelocity * Time.deltaTime;
-
         
-        const int MAX_ITERATIONS = 16;
-
         bool groundedThisFrame = false;
         
+        const int MAX_ITERATIONS = 16;
         for (int solverIt = 0; solverIt < MAX_ITERATIONS; ++solverIt)
         {
             Vector3 boxCenter = transform.TransformPoint(boxCollider.center);
@@ -216,10 +214,7 @@ public class SimpleKinematicMotor : MonoBehaviour
             {
                 Collider otherCollider = lastProjectedCollisions[i];
                 // ignore our own collider
-                if (boxCollider == otherCollider)
-                {
-                    continue;
-                }
+                if (boxCollider == otherCollider) { continue; }
 
                 Transform otherTransform = otherCollider.transform;
 
@@ -249,10 +244,7 @@ public class SimpleKinematicMotor : MonoBehaviour
                     else
                     {
                         // too small to care about
-                        if (penDepth < skinWidth)
-                        {
-                            continue;
-                        }
+                        if (penDepth < skinWidth) { continue; }
 
                         // prevent climbing!!
                         float oldPosY = projectedPosition.y;
@@ -278,16 +270,22 @@ public class SimpleKinematicMotor : MonoBehaviour
             
             TO_NEXT_ITERATION: ;
         }
-
-        
         
         // ground adhesion
         if(useGroundAdhesion && !jumpedThisFrame && wasGrounded && !groundedThisFrame)
         {
             Vector3 offsetToCenter = transform.TransformVector(boxCollider.center);
-            Vector3 boxHalf = boxCollider.size / 2.0f;
-            boxHalf.y = 0.5f;
-            cachedGroundAdhesionResultsCount = Physics.BoxCastNonAlloc(projectedPosition + offsetToCenter, boxHalf, Vector3.down, cachedGroundAdhesionResults, Quaternion.identity, 0.5f + groundAdhesionDistance);
+            Vector3 offsetToBottom = offsetToCenter + transform.TransformVector(new Vector3(0,-boxCollider.size.y / 2.0f,0));
+
+            float yOffset = offsetToCenter.y - offsetToBottom.y;
+        
+            const float GROUND_ADHESION_THICKNESS = 1.0f;
+            Vector3 worldSizeWithSkin = transform.TransformVector((boxCollider.size / 2.0f) - new Vector3(skinWidth,skinWidth,skinWidth));
+            
+            Vector3 boxHalf = worldSizeWithSkin;
+            boxHalf.y = GROUND_ADHESION_THICKNESS / 2.0f;
+            
+            cachedGroundAdhesionResultsCount = Physics.BoxCastNonAlloc(projectedPosition + offsetToCenter, boxHalf, Vector3.down, cachedGroundAdhesionResults, Quaternion.identity, yOffset + groundAdhesionDistance);
             for(int i = 0; i < cachedGroundAdhesionResultsCount; ++i)
             {
                 RaycastHit hit = cachedGroundAdhesionResults[i];
@@ -300,7 +298,7 @@ public class SimpleKinematicMotor : MonoBehaviour
                     groundedThisFrame = true;
                     lastGroundNormal = hit.normal;
                     
-                    projectedPosition += Vector3.down * (hit.distance - 0.5f);
+                    projectedPosition += Vector3.down * (hit.distance - GROUND_ADHESION_THICKNESS / 2.0f);
 
                     Debug.DrawRay(projectedPosition, lastGroundNormal * 5.0f, Color.yellow);
                     
