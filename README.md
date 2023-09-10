@@ -14,6 +14,28 @@ out-of-the-box.
 - [Super Character Controller](https://roystanross.wordpress.com/category/unity-character-controller-series/)
 - [2D Platformer Collision Detection](http://deranged-hermit.blogspot.com/2014/01/2d-platformer-collision-detection-with.html)
 
+## Roadmap
+
+- [ ] Support for stairs
+- [ ] Easier collision detection and handling
+- [ ] Events / callbacks for changes in grounding status
+- [ ] Accessors for estimated velocity
+- [ ] Accessors for foot position
+- [ ] Basic push/stand force
+- [ ] Accessors for character height
+- [ ] Methods for applying forces/pushes to character
+- [ ] Create a hazard course
+- [ ] Create a more complete playground
+- [ ] Method for teleportation
+- [ ] Refactor to generic-purpose Kinematic Body
+- [ ] Refactor to support different collision shapes
+
+### Extended Feature Set
+
+- [ ] Ladders
+- [ ] Swimming
+- [ ] Moving with Moving Platforms
+
 ## License
 
-MIT License (c) 2019-2020 Terry Nguyen
+MIT License (c) 2019-2022 Terry Nguyen

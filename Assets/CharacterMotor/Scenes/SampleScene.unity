@@ -454,7 +454,8 @@ MonoBehaviour:
   gravityMultiplier: 2.5
   skinWidth: 0.01
   preventClimbing: 1
-  useGroundAdhesion: 1
+  useGroundAdhesion: 0
+  useGroundNormalProjection: 1
 --- !u!1 &125990606
 GameObject:
   m_ObjectHideFlags: 0
