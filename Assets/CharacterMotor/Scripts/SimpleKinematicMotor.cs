@@ -1,4 +1,3 @@
-// TODO: ground retain normal and use that for movement
 // TODO: iterative depenetration
 
 using System;
@@ -7,6 +6,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
+[SelectionBase]
 public class SimpleKinematicMotor : MonoBehaviour
 {
     [Header("Components")]
@@ -28,9 +28,12 @@ public class SimpleKinematicMotor : MonoBehaviour
     private float acceleration = 12.0f;
     [SerializeField]
     private float maxGroundAngle = 60.0f;
+    private Vector3 lastGroundNormal;
+    
     [Space]
     [SerializeField]
     private float groundFriction = 5.0f;
+    
     [Space]
     public float groundAdhesionDistance = 0.1f;
     private RaycastHit[] cachedGroundAdhesionResults;
@@ -42,6 +45,7 @@ public class SimpleKinematicMotor : MonoBehaviour
 
     private Collider[] lastProjectedCollisions = new Collider[32];
     private int lastProjectedCollisionCount = 0;
+    
     [Space]
     public bool useGravity = true;
     public float gravityMultiplier = 1.0f;
@@ -66,7 +70,7 @@ public class SimpleKinematicMotor : MonoBehaviour
     private bool wasGrounded;
     public bool Grounded => wasGrounded;
 
-    private void SetupPlayerInputBindings(PlayerController controller)
+    private void SetupPlayerInputBindings()
     {
         if (controller != null && controller.Input != null)
         {
@@ -80,8 +84,8 @@ public class SimpleKinematicMotor : MonoBehaviour
 
     public void Possess(PlayerController controller)
     {
-        SetupPlayerInputBindings(controller);
         this.controller = controller;
+        SetupPlayerInputBindings();
     }
 
     public void Unpossess()
@@ -121,7 +125,7 @@ public class SimpleKinematicMotor : MonoBehaviour
     {
         if(controller != null && !inputCallbackGroup.IsBound)
         {
-            SetupPlayerInputBindings(controller);
+            SetupPlayerInputBindings();
         }
     }
     private void OnDisable()
@@ -172,6 +176,12 @@ public class SimpleKinematicMotor : MonoBehaviour
                 velocity.y = jumpForce;
             }
         }
+        
+        // reproject velocity if needed
+        if (wasGrounded && !jumpedThisFrame)
+        {
+            Velocity = Vector3.ProjectOnPlane(Velocity, lastGroundNormal);
+        }
 
         // process forces
         if (useGravity)
@@ -181,67 +191,88 @@ public class SimpleKinematicMotor : MonoBehaviour
 
         projectedPosition += Velocity * Time.deltaTime;
 
-        Vector3 boxCenter = transform.TransformPoint(boxCollider.center);
-        
-        // check for collisions
-        lastProjectedCollisionCount = Physics.OverlapBoxNonAlloc(boxCenter, boxCollider.size / 2.0f, lastProjectedCollisions);
+        const int MAX_ITERATIONS = 16;
 
         bool groundedThisFrame = false;
-
-        for(int i = 0; i < lastProjectedCollisionCount; ++i)
+        
+        for (int solverIt = 0; solverIt < MAX_ITERATIONS; ++solverIt)
         {
-            Collider otherCollider = lastProjectedCollisions[i];
-            // ignore our own collider
-            if (boxCollider == otherCollider) { continue; }
-            Transform otherTransform = otherCollider.transform;
+            Vector3 boxCenter = transform.TransformPoint(boxCollider.center);
 
-            bool isPen = Physics.ComputePenetration(boxCollider, projectedPosition, Quaternion.identity,
-                                       otherCollider, otherTransform.position, otherTransform.rotation,
-                                       out Vector3 penDir, out float penDepth);
-
-            // depenetrate if actually colliding
-            if (isPen)
+            // check for collisions
+            lastProjectedCollisionCount =
+                Physics.OverlapBoxNonAlloc(boxCenter, boxCollider.size / 2.0f, lastProjectedCollisions);
+            
+            for (int i = 0; i < lastProjectedCollisionCount; ++i)
             {
-                // floor
-                if (Vector3.Angle(penDir, Vector3.up) < maxGroundAngle)
+                Collider otherCollider = lastProjectedCollisions[i];
+                // ignore our own collider
+                if (boxCollider == otherCollider)
                 {
-                    groundedThisFrame = true;
-
-                    // only resolve Y on position
-                    Vector3 mtv = penDir * penDepth;
-                    projectedPosition.y += mtv.y;
-                    
-                    // only resolve Y on velocity
-                    Vector3 clippedVelocity = Vector3.ProjectOnPlane(Velocity, penDir);
-                    velocity.y = clippedVelocity.y;
+                    continue;
                 }
-                // walls / other objects
-                else
+
+                Transform otherTransform = otherCollider.transform;
+
+                bool isPen = Physics.ComputePenetration(boxCollider, projectedPosition, Quaternion.identity,
+                    otherCollider, otherTransform.position, otherTransform.rotation,
+                    out Vector3 penDir, out float penDepth);
+
+                // depenetrate if actually colliding
+                if (isPen)
                 {
-                    // too small to care about
-                    if (penDepth < skinWidth) { continue; }
-
-                    // prevent climbing!!
-                    float oldPosY = projectedPosition.y;
-                    float oldVelY = Velocity.y;
-
-                    // resolving the position
-                    projectedPosition += penDir * penDepth;
-                    velocity = Vector3.ProjectOnPlane(velocity, penDir);
-
-                    if (preventClimbing)
+                    // floor
+                    if (Vector3.Angle(penDir, Vector3.up) < maxGroundAngle)
                     {
-                        projectedPosition.y = Mathf.Min(projectedPosition.y, oldPosY);
-                        velocity.y = Mathf.Min(velocity.y, oldVelY);
+                        groundedThisFrame = true;
+                        lastGroundNormal = penDir;
+
+                        // only resolve Y on position
+                        Vector3 mtv = penDir * penDepth;
+                        projectedPosition.y += mtv.y;
+
+                        // only resolve Y on velocity
+                        Vector3 clippedVelocity = Vector3.ProjectOnPlane(Velocity, penDir);
+                        velocity.y = clippedVelocity.y;
                     }
+                    // walls / other objects
+                    else
+                    {
+                        // too small to care about
+                        if (penDepth < skinWidth)
+                        {
+                            continue;
+                        }
+
+                        // prevent climbing!!
+                        float oldPosY = projectedPosition.y;
+                        float oldVelY = Velocity.y;
+
+                        // resolving the position
+                        projectedPosition += penDir * penDepth;
+                        velocity = Vector3.ProjectOnPlane(velocity, penDir);
+
+                        if (preventClimbing)
+                        {
+                            projectedPosition.y = Mathf.Min(projectedPosition.y, oldPosY);
+                            velocity.y = Mathf.Min(velocity.y, oldVelY);
+                        }
+                    }
+                    
+                    goto TO_NEXT_ITERATION;
                 }
             }
+            
+            // if we didn't collide, we're done
+            break;
+            
+            TO_NEXT_ITERATION: ;
         }
-        
+
         // ground adhesion
         if(useGroundAdhesion && !jumpedThisFrame && wasGrounded && !groundedThisFrame)
         {
-            boxCenter = transform.TransformPoint(boxCollider.center);
+            Vector3 boxCenter = transform.TransformPoint(boxCollider.center);
             cachedGroundAdhesionResultsCount = Physics.BoxCastNonAlloc(boxCenter, boxCollider.size / 2.0f, Vector3.down, cachedGroundAdhesionResults, Quaternion.identity, groundAdhesionDistance);
             for(int i = 0; i < cachedGroundAdhesionResultsCount; ++i)
             {
@@ -253,7 +284,8 @@ public class SimpleKinematicMotor : MonoBehaviour
                 if (Vector3.Angle(hit.normal, Vector3.up) < maxGroundAngle)
                 {
                     groundedThisFrame = true;
-
+                    lastGroundNormal = hit.normal;
+                    
                     projectedPosition += Vector3.down * hit.distance;
 
                     break;
