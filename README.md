@@ -1,9 +1,5 @@
 # Character Motor Experiment
 
-Everyone knows that the `CharacterController` component in Unity is great for
-prototyping, but doesn't (and shouldn't) do everything you might want it to
-out-of-the-box.
-
 ## Resources
 
 - [Bunnyhopping from the Programmer's Perspective](http://flafla2.github.io/2015/02/14/bunnyhop.html)
@@ -36,6 +32,26 @@ out-of-the-box.
 - [ ] Ladders
 - [ ] Swimming
 - [ ] Moving with Moving Platforms
+
+### Related Projects
+- https://github.com/dbrizov/NaughtyCharacter - Kinematic, Wraps Character Controller component
+- https://github.com/nicholas-maltbie/OpenKCC - Kinematic, Custom
+- https://github.com/aleksandrpp/CompetitiveController - Kinematic, Custom
+- https://github.com/joebinns/stylised-character-controller - Simulated, Rigidbody
+- [Kinematic Character Controller by Philippe St-Amand](https://assetstore.unity.com/packages/tools/physics/kinematic-character-controller-99131) - Kinematic, Custom
+- [Character Controller package by Unity Technologies](https://docs.unity3d.com/Packages/com.unity.charactercontroller@1.0/manual/index.html) - Kinematic, Custom, DOTS
+    - Possibly based off of Rival, a DOTS-based Unity Asset Store package, prior to Philippe St-Amand joining Unity
+- Starter Assets for [First Person][unityFPS] and [Third Person][unityTPS] Character Controllers by Unity Technologies
+
+[unityFPS]:https://assetstore.unity.com/packages/essentials/starter-assets-first-person-character-controller-urp-196525#content
+[unityTPS]:https://assetstore.unity.com/packages/essentials/starter-assets-third-person-character-controller-urp-196526#content
+
+#### Tutorials
+- [Making A Physics Based Character Controller In Unity (for Very Very Valet)](https://www.youtube.com/watch?v=qdskE8PJy6Q&ab_channel=ToyfulGames) - Simulated, Rigidbody
+- [Catlike Coding by Jasper Flick](https://catlikecoding.com/unity/tutorials/movement/) - Simulated, Rigidbody
+- [Indie Wafflus' Genshin Impact Movement Tutorials](https://www.youtube.com/playlist?list=PL0yxB6cCkoWKuPoh_9dSvdItQENVx7YTW) - Simulated, Rigidbody
+- [Unity DOTS Character Controller](https://www.vertexfragment.com/ramblings/unity-dots-character-controller/) - Kinematic, Custom, DOTS
+
 
 ## License
 
