@@ -16,7 +16,7 @@ out-of-the-box.
 
 ## Roadmap
 
-- [ ] Support for stairs
+- [x] Support for stairs
 - [ ] Easier collision detection and handling
 - [ ] Events / callbacks for changes in grounding status
 - [ ] Accessors for estimated velocity
@@ -27,6 +27,7 @@ out-of-the-box.
 - [ ] Create a hazard course
 - [ ] Create a more complete playground
 - [ ] Method for teleportation
+- [ ] Major refactor to use a cast/sweep-based test instead of move-and-check approach
 - [ ] Refactor to generic-purpose Kinematic Body
 - [ ] Refactor to support different collision shapes
 

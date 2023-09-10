@@ -46,6 +46,9 @@ public class SimpleKinematicMotor : MonoBehaviour
     private Collider[] lastProjectedCollisions = new Collider[32];
     private int lastProjectedCollisionCount = 0;
     
+    private Collider[] lastStepCollisions = new Collider[32];
+    private int lastStepCollisionCount = 0;
+    
     [Space]
     public bool useGravity = true;
     public float gravityMultiplier = 1.0f;
@@ -61,6 +64,9 @@ public class SimpleKinematicMotor : MonoBehaviour
     private bool useGroundAdhesion = true;
     [SerializeField]
     private bool useGroundNormalProjection = true;
+    [SerializeField]
+    private bool useStairStepping = true;
+    public float stepHeight = 0.5f;
     
     private Vector3 velocity;
     public Vector3 Velocity
@@ -68,10 +74,10 @@ public class SimpleKinematicMotor : MonoBehaviour
         get => velocity;
         set => velocity = value;
     }
-
+    
     private bool wasGrounded;
     public bool Grounded => wasGrounded;
-
+    
     private void SetupPlayerInputBindings()
     {
         if (controller != null && controller.Input != null)
@@ -261,12 +267,96 @@ public class SimpleKinematicMotor : MonoBehaviour
                         // only resolve Y on velocity
                         Vector3 clippedVelocity = Vector3.ProjectOnPlane(Velocity, penDir);
                         velocity.y = clippedVelocity.y;
+
+                        // nothing changed here, let's move onto the next object 
+                        if (penDepth < skinWidth) { continue; }
                     }
                     // walls / other objects
                     else
                     {
                         // too small to care about
                         if (penDepth < skinWidth) { continue; }
+
+                        Vector3 stepOffset = new Vector3(0, stepHeight, 0); 
+                        
+                        // can we avoid it by going over it?
+                        if (useStairStepping && wasGrounded)
+                        {
+                            // TODO: consolidate the step ground detection logic into a reusable method since we do the same
+                            //       thing later for the ground adhesion logic
+                            
+                            // TODO: always perform step ground detection logic followed by overlap detection in order to
+                            //       prevent failure in situations where the ceiling is too low to step over but there is
+                            //       technically enough clearance to walk under it / stand on the next step
+                            
+                            lastStepCollisionCount = Overlap(projectedPosition + stepOffset, lastStepCollisions);
+                            if (lastStepCollisionCount > 0)
+                            {
+                                bool canStep = true;
+
+                                for (int j = 0; j < lastStepCollisionCount; ++j)
+                                {
+                                    Collider currentStepCollider = lastStepCollisions[j];
+                                    // ignore our own collider
+                                    if (boxCollider == currentStepCollider)
+                                    {
+                                        continue;
+                                    }
+
+                                    Transform stepTransform = currentStepCollider.transform;
+
+                                    bool isStepPen = Physics.ComputePenetration(boxCollider,
+                                        projectedPosition + new Vector3(0, stepHeight, 0), Quaternion.identity,
+                                        currentStepCollider, stepTransform.position, stepTransform.rotation,
+                                        out Vector3 stepPenDir, out float stepPenDepth);
+
+                                    if (isStepPen)
+                                    {
+                                        if (stepPenDepth > skinWidth)
+                                        {
+                                            canStep = false;
+                                            break;
+                                        }
+                                    }
+                                }
+
+                                if (canStep)
+                                {
+                                    float yOffset = offsetToCenter.y - offsetToBottom.y;
+        
+                                    const float GROUND_ADHESION_THICKNESS = 1.0f;
+                                    Vector3 worldSizeWithSkin = transform.TransformVector((boxCollider.size / 2.0f) - new Vector3(skinWidth,skinWidth,skinWidth));
+            
+                                    Vector3 boxHalfWithSkin = worldSizeWithSkin;
+                                    boxHalfWithSkin.y = GROUND_ADHESION_THICKNESS / 2.0f;
+            
+                                    cachedGroundAdhesionResultsCount = Cast(projectedPosition + stepOffset, boxHalfWithSkin, Vector3.down, cachedGroundAdhesionResults, yOffset + groundAdhesionDistance);
+                                    
+                                    bool canGroundOnStep = false;
+                                    for (int j = 0; j < cachedGroundAdhesionResultsCount; ++j)
+                                    {
+                                        if (cachedGroundAdhesionResults[j].collider != otherCollider) { continue; }
+
+                                        // exit early w/ failure if we could step over but we can't actually stand on it
+                                        if (!(Vector3.Angle(cachedGroundAdhesionResults[j].normal, Vector3.up) <
+                                              maxGroundAngle)) { break; }
+
+                                        canGroundOnStep = true;
+                                        groundedThisFrame = true;
+                                        lastGroundNormal = cachedGroundAdhesionResults[j].normal;
+                                        
+                                        projectedPosition = projectedPosition + stepOffset + Vector3.down * (cachedGroundAdhesionResults[j].distance - GROUND_ADHESION_THICKNESS / 2.0f);
+                                    }
+
+                                    // TODO: what happens about the grounded state?
+                                    // do we have to catch it in the ground adhesion routine?
+                                    if (canGroundOnStep)
+                                    {
+                                        goto TO_NEXT_ITERATION;
+                                    }
+                                }
+                            }
+                        }
 
                         // prevent climbing!!
                         float oldPosY = projectedPosition.y;
