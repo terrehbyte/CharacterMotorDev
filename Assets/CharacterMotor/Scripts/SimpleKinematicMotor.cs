@@ -59,6 +59,8 @@ public class SimpleKinematicMotor : MonoBehaviour
     private bool preventClimbing = true;
     [SerializeField]
     private bool useGroundAdhesion = true;
+    [SerializeField]
+    private bool useGroundNormalProjection = true;
     
     private Vector3 velocity;
     public Vector3 Velocity
@@ -176,21 +178,28 @@ public class SimpleKinematicMotor : MonoBehaviour
                 velocity.y = jumpForce;
             }
         }
-        
-        // reproject velocity if needed
-        if (wasGrounded && !jumpedThisFrame)
-        {
-            Velocity = Vector3.ProjectOnPlane(Velocity, lastGroundNormal);
-        }
 
         // process forces
         if (useGravity)
         {
             Velocity += Physics.gravity * (gravityMultiplier * Time.deltaTime);
         }
+        
+        Vector3 effectiveVelocity = Velocity;
+        
+        // reproject velocity if needed
+        if (useGroundNormalProjection && wasGrounded && !jumpedThisFrame)
+        {
+            effectiveVelocity.y = 0.0f;
+            effectiveVelocity = Vector3.ProjectOnPlane(effectiveVelocity, lastGroundNormal);
+            effectiveVelocity.y = Velocity.y;
+        }
+        
+        Debug.DrawRay(projectedPosition, effectiveVelocity.normalized * 5.0f, Color.cyan);
+        
+        projectedPosition += effectiveVelocity * Time.deltaTime;
 
-        projectedPosition += Velocity * Time.deltaTime;
-
+        
         const int MAX_ITERATIONS = 16;
 
         bool groundedThisFrame = false;
@@ -226,6 +235,7 @@ public class SimpleKinematicMotor : MonoBehaviour
                     {
                         groundedThisFrame = true;
                         lastGroundNormal = penDir;
+                        Debug.DrawRay(projectedPosition, lastGroundNormal * 5.0f, Color.red);
 
                         // only resolve Y on position
                         Vector3 mtv = penDir * penDepth;
@@ -247,7 +257,7 @@ public class SimpleKinematicMotor : MonoBehaviour
                         // prevent climbing!!
                         float oldPosY = projectedPosition.y;
                         float oldVelY = Velocity.y;
-
+                        
                         // resolving the position
                         projectedPosition += penDir * penDepth;
                         velocity = Vector3.ProjectOnPlane(velocity, penDir);
@@ -269,11 +279,15 @@ public class SimpleKinematicMotor : MonoBehaviour
             TO_NEXT_ITERATION: ;
         }
 
+        
+        
         // ground adhesion
         if(useGroundAdhesion && !jumpedThisFrame && wasGrounded && !groundedThisFrame)
         {
-            Vector3 boxCenter = transform.TransformPoint(boxCollider.center);
-            cachedGroundAdhesionResultsCount = Physics.BoxCastNonAlloc(boxCenter, boxCollider.size / 2.0f, Vector3.down, cachedGroundAdhesionResults, Quaternion.identity, groundAdhesionDistance);
+            Vector3 offsetToCenter = transform.TransformVector(boxCollider.center);
+            Vector3 boxHalf = boxCollider.size / 2.0f;
+            boxHalf.y = 0.5f;
+            cachedGroundAdhesionResultsCount = Physics.BoxCastNonAlloc(projectedPosition + offsetToCenter, boxHalf, Vector3.down, cachedGroundAdhesionResults, Quaternion.identity, 0.5f + groundAdhesionDistance);
             for(int i = 0; i < cachedGroundAdhesionResultsCount; ++i)
             {
                 RaycastHit hit = cachedGroundAdhesionResults[i];
@@ -286,8 +300,14 @@ public class SimpleKinematicMotor : MonoBehaviour
                     groundedThisFrame = true;
                     lastGroundNormal = hit.normal;
                     
-                    projectedPosition += Vector3.down * hit.distance;
+                    projectedPosition += Vector3.down * (hit.distance - 0.5f);
 
+                    Debug.DrawRay(projectedPosition, lastGroundNormal * 5.0f, Color.yellow);
+                    
+                    // only resolve Y on velocity
+                    Vector3 clippedVelocity = Vector3.ProjectOnPlane(Velocity, hit.normal);
+                    velocity.y = clippedVelocity.y;
+                    
                     break;
                 }
             }
