@@ -104,6 +104,28 @@ public class SimpleKinematicMotor : MonoBehaviour
     {
         jumpWish = newJump;
     }
+    
+    public int Overlap(Vector3 bodyPosition, Vector3 halfExtents, Collider[] results)
+    {
+        return Physics.OverlapBoxNonAlloc(bodyPosition + transform.TransformVector(boxCollider.center), halfExtents, results);
+    }
+
+    public int Overlap(Vector3 bodyPosition, Collider[] results)
+    {
+        Vector3 worldBodyHalfSize = transform.TransformVector(boxCollider.size / 2.0f);
+        return Overlap(bodyPosition, worldBodyHalfSize, results);
+    }
+
+    public int Cast(Vector3 bodyPosition, Vector3 halfExtents, Vector3 direction, RaycastHit[] hits, float distance)
+    {
+        return Physics.BoxCastNonAlloc(bodyPosition + transform.TransformVector(boxCollider.center), halfExtents, direction, hits, Quaternion.identity, distance);
+    }
+    
+    public int Cast(Vector3 bodyPosition, Vector3 direction, RaycastHit[] hits, float distance)
+    {
+        Vector3 worldBodyHalfSize = transform.TransformVector(boxCollider.size / 2.0f);
+        return Cast(bodyPosition, worldBodyHalfSize, direction, hits, distance);
+    }
 
     private void HandleJump(InputAction.CallbackContext obj)
     {
@@ -144,6 +166,10 @@ public class SimpleKinematicMotor : MonoBehaviour
     {
         // calculate projected position
         Vector3 projectedPosition = rbody.position;
+        
+        // todo probably could cache these
+        Vector3 offsetToCenter = transform.TransformVector(boxCollider.center);
+        Vector3 offsetToBottom = offsetToCenter + transform.TransformVector(new Vector3(0,-boxCollider.size.y / 2.0f,0));
 
         // applying friction
         float keepY = Velocity.y;
@@ -204,11 +230,7 @@ public class SimpleKinematicMotor : MonoBehaviour
         const int MAX_ITERATIONS = 16;
         for (int solverIt = 0; solverIt < MAX_ITERATIONS; ++solverIt)
         {
-            Vector3 boxCenter = transform.TransformPoint(boxCollider.center);
-
-            // check for collisions
-            lastProjectedCollisionCount =
-                Physics.OverlapBoxNonAlloc(boxCenter, boxCollider.size / 2.0f, lastProjectedCollisions);
+            lastProjectedCollisionCount = Overlap(projectedPosition, lastProjectedCollisions);
             
             for (int i = 0; i < lastProjectedCollisionCount; ++i)
             {
@@ -274,24 +296,23 @@ public class SimpleKinematicMotor : MonoBehaviour
         // ground adhesion
         if(useGroundAdhesion && !jumpedThisFrame && wasGrounded && !groundedThisFrame)
         {
-            Vector3 offsetToCenter = transform.TransformVector(boxCollider.center);
-            Vector3 offsetToBottom = offsetToCenter + transform.TransformVector(new Vector3(0,-boxCollider.size.y / 2.0f,0));
-
             float yOffset = offsetToCenter.y - offsetToBottom.y;
         
             const float GROUND_ADHESION_THICKNESS = 1.0f;
             Vector3 worldSizeWithSkin = transform.TransformVector((boxCollider.size / 2.0f) - new Vector3(skinWidth,skinWidth,skinWidth));
             
-            Vector3 boxHalf = worldSizeWithSkin;
-            boxHalf.y = GROUND_ADHESION_THICKNESS / 2.0f;
+            Vector3 boxHalfWithSkin = worldSizeWithSkin;
+            boxHalfWithSkin.y = GROUND_ADHESION_THICKNESS / 2.0f;
             
-            cachedGroundAdhesionResultsCount = Physics.BoxCastNonAlloc(projectedPosition + offsetToCenter, boxHalf, Vector3.down, cachedGroundAdhesionResults, Quaternion.identity, yOffset + groundAdhesionDistance);
+            cachedGroundAdhesionResultsCount = Cast(projectedPosition, boxHalfWithSkin, Vector3.down, cachedGroundAdhesionResults, yOffset + groundAdhesionDistance);
             for(int i = 0; i < cachedGroundAdhesionResultsCount; ++i)
             {
                 RaycastHit hit = cachedGroundAdhesionResults[i];
 
                 // ignore ourselves
                 if(hit.collider == boxCollider) { continue; }
+                // ignore objects we're inside of
+                if (hit.distance == 0.0f) { continue; }
 
                 if (Vector3.Angle(hit.normal, Vector3.up) < maxGroundAngle)
                 {
